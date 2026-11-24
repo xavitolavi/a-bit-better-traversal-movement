@@ -3,7 +3,7 @@ Final Fantasy VII Rebirth (PC, game version 1.0.0.5)
 
 Makes moving around the field feel less locked and stiff: faster traversal animations, steering while falling,
 longer dodge rolls that can carry you off small ledges, landing where you actually fall, no running in place
-against walls, and more. Every setting is in TraversalSpeed.ini and applies live while you play.
+against walls, a camera that follows you down when you drop off a ledge, and more. Every setting is in TraversalSpeed.ini and applies live while you play.
 
 INSTALL
 1. Open the game folder: Steam > Final Fantasy VII Rebirth > right-click > Manage > Browse local files.
@@ -16,7 +16,8 @@ UNINSTALL
 Delete dwmapi.dll (and TraversalSpeed.ini / TraversalSpeed.log) from End\Binaries\Win64.
 
 SETTINGS
-Edit End\Binaries\Win64\TraversalSpeed.ini while the game runs; changes apply within a second. Every option is
+Edit End\Binaries\Win64\TraversalSpeed.ini while the game runs; changes apply within a second (the [camera]
+options are read once at game start: restart after changing them). Every option is
 explained inside the file. enabled=0 turns the whole mod off.
 
 COMPATIBILITY

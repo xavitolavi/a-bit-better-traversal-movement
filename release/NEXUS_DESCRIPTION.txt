@@ -16,7 +16,8 @@ Moving around the world in Rebirth can feel locked in and stiff: every ledge pla
 [*][b]Acrobacias prompt closer to the edge[/b] - the prompt (and the button traversal) only kicks in when you're actually near the ledge. Fully adjustable.
 [*][b]No running in place against walls[/b] - push into a wall and the character stops instead of running on the spot. Low obstacles you can hop, small props and other characters don't count.
 [*][b]Hands on the wall[/b] - against a tall wall, the character turns to face it and rests both hands on it. If that wall can be climbed, the Acrobacias prompt shows from there at the game's normal distance.
-[*][b]Everything live-tunable[/b] - one commented ini file, changes apply within a second while the game runs.
+[*][b]Camera follows the fall[/b] - when you roll or drop off a ledge, the camera now follows you down instead of hanging back and catching up only after you land.
+[*][b]Everything live-tunable[/b] - one commented ini file, changes apply within a second while the game runs (the [i][camera][/i] options need a game restart).
 [/list]
 
 [size=4][b]Installation[/b][/size]

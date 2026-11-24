@@ -292,7 +292,14 @@ static const char* RELEASE_INI =
     "wall_hand_rate=0\r\n"
     "; prompt_reach used while the hands-on-wall pose shows, so a climbable wall offers its prompt from there\r\n"
     "; (1 = the game's normal distance)\r\n"
-    "wall_hand_prompt_reach=1\r\n";
+    "wall_hand_prompt_reach=1\r\n"
+    "\r\n"
+    "[camera]\r\n"
+    "; 1 = the camera follows the character down while falling (e.g. after rolling off a ledge) instead of catching up\r\n"
+    ";     only after landing. Read once at game start: restart the game after changing these two.\r\n"
+    "fall_follow=1\r\n"
+    "; how quickly the camera follows height changes (the game's own value is 5)\r\n"
+    "fall_follow_speed=40\r\n";
 
 static bool LoadIni() {
     wchar_t path[MAX_PATH]; IniPath(path, L"TraversalSpeed.ini");
@@ -2240,6 +2247,57 @@ static bool IsSupportedBuild(uintptr_t base) {
     return memcmp(reinterpret_cast<void*>(base + RVA_SigSite), SIG_BYTES, sizeof(SIG_BYTES)) == 0;
 }
 
+// ---------------------------------------------------------------- camera follows falls ([camera] fall_follow)
+// While airborne the field camera eases toward the player's height slowly (CameraModule row DefaultHeightDeadzone:
+// height deadzones and follow speeds), so after a roll off a ledge it only catches up once he has landed. The game
+// reads that row once, early at startup, so this thread finds the row's values in memory as soon as the table is
+// loaded and rewrites them before the camera reads them: no deadzone, and faster follow speeds.
+static const float DZ_ORIG[10] = { 5.f, 1.f, 5.f, 0.f, 1.5f, 200.f, 1.f, 5.f, 1.f, 5.f };   // Param0..Param9
+static int ScanPatchDeadzone(float speed) {   // plain function (SEH only): returns how many copies were patched
+    int n = 0; uint8_t* a = nullptr; MEMORY_BASIC_INFORMATION mbi;
+    while (VirtualQuery(a, &mbi, sizeof(mbi))) {
+        uint8_t* b = static_cast<uint8_t*>(mbi.BaseAddress); size_t sz = mbi.RegionSize;
+        if (mbi.State == MEM_COMMIT && mbi.Protect == PAGE_READWRITE && (mbi.Type == MEM_PRIVATE || mbi.Type == MEM_MAPPED)) {
+            __try {
+                const uint32_t key = 0x43480000;   // 200.0f = Param5, then check the whole row around it
+                uint32_t* w = reinterpret_cast<uint32_t*>(b); size_t nw = sz / 4;
+                for (size_t i = 5; i + 5 < nw; ++i) {
+                    if (w[i] != key) continue;
+                    float* p = reinterpret_cast<float*>(w + i - 5);
+                    if (memcmp(p, DZ_ORIG, sizeof(DZ_ORIG)) != 0) continue;
+                    p[0] = 0.f; p[4] = 0.f; p[5] = 0.f;                // height deadzones off
+                    p[2] = speed; p[7] = speed; p[9] = speed;          // follow speeds
+                    ++n;
+                }
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        a = b + sz;
+        if (reinterpret_cast<uintptr_t>(a) >= 0x7FFFFFFF0000ull) break;
+    }
+    return n;
+}
+static DWORD WINAPI CameraPatchThread(LPVOID) {
+    wchar_t path[MAX_PATH]; IniPath(path, L"TraversalSpeed.ini");
+    wchar_t v[32];
+    if (!GetPrivateProfileStringW(L"camera", L"fall_follow", L"", v, 32, path)) WritePrivateProfileStringW(L"camera", L"fall_follow", L"1", path);
+    if (!GetPrivateProfileStringW(L"camera", L"fall_follow_speed", L"", v, 32, path)) WritePrivateProfileStringW(L"camera", L"fall_follow_speed", L"40", path);
+    if (!GetPrivateProfileIntW(L"global", L"enabled", 1, path) || !GetPrivateProfileIntW(L"camera", L"fall_follow", 1, path)) {
+        Log("camera: fall_follow off (vanilla camera height follow)"); return 0;
+    }
+    GetPrivateProfileStringW(L"camera", L"fall_follow_speed", L"40", v, 32, path);
+    float speed = (float)_wtof(v); if (!(speed >= 1.f && speed <= 200.f)) speed = 40.f;
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    ULONGLONG t0 = GetTickCount64(); int found = 0;
+    while (GetTickCount64() - t0 < 180000) {          // the table loads early in startup; keep looking for 3 min
+        int n = ScanPatchDeadzone(speed);
+        if (n) { found += n; Log("camera: fall_follow applied (%d cop%s, speed %.0f) %.1f s after start", n, n == 1 ? "y" : "ies", speed, (GetTickCount64() - t0) / 1000.0); }
+        if (found && GetTickCount64() - t0 > 30000) break;   // one more sweep window for late copies, then stop
+        Sleep(found ? 2000 : 100);
+    }
+    if (!found) Log("camera: camera height table not found - fall_follow not applied");
+    return 0;
+}
+
 BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_module = mod;
@@ -2268,6 +2326,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID) {
         InstallTeleportHook(g_base);
         InstallAutoTraversalGate(g_base);
         InstallPromptReach(g_base);
+        { HANDLE c = CreateThread(nullptr, 0, CameraPatchThread, nullptr, 0, nullptr); if (c) CloseHandle(c); }
         HANDLE h = CreateThread(nullptr, 0, MainThread, nullptr, 0, nullptr);
         if (h) CloseHandle(h);
     }
