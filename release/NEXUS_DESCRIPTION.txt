@@ -15,7 +15,7 @@ Moving around the world in Rebirth can feel locked in and stiff: every ledge pla
 [*][b]Breathing room between traversals[/b] - a short pause after a big traversal, so two ledges close together don't cut each other's animations short.
 [*][b]Acrobacias prompt closer to the edge[/b] - the prompt (and the button traversal) only kicks in when you're actually near the ledge. Fully adjustable.
 [*][b]No running in place against walls[/b] - push into a wall and the character stops instead of running on the spot. Low obstacles you can hop, small props and other characters don't count.
-[*][b]Hands on the wall[/b] - against a tall wall, the character turns to face it and rests both hands on it.
+[*][b]Hands on the wall[/b] - against a tall wall, the character turns to face it and rests both hands on it. If that wall can be climbed, the Acrobacias prompt shows from there at the game's normal distance.
 [*][b]Everything live-tunable[/b] - one commented ini file, changes apply within a second while the game runs.
 [/list]
 

@@ -189,7 +189,7 @@ static const char* TRAV_INI =
 struct SteerCfg {
     bool enabled = true, air = true, landing = true; float window = 1.2f, rate = 180.f; char keys[4] = { 'W', 'A', 'S', 'D' };
     float rollDist = 1.3f, rollTime = 0.9f; int rollKey = VK_SPACE; float landKeep = 0.5f, landTime = 0.35f;
-    bool rollVault = false, offLedges = true, freeFall = true; float cooldown = 0.2f, rollBlock = 0.45f, maxDrop = 450.f, coolMinH = 150.f, promptReach = 1.f; bool wallStop = true, wallHand = true, wallHandFlip = false; float wallHandTime = 0.3f, wallHandRate = 0.f, wallHandBlend = 0.25f, wallHandMinH = 200.f;
+    bool rollVault = false, offLedges = true, freeFall = true; float cooldown = 0.2f, rollBlock = 0.45f, maxDrop = 450.f, coolMinH = 150.f, promptReach = 1.f; bool wallStop = true, wallHand = true, wallHandFlip = false; float wallHandTime = 0.3f, wallHandRate = 0.f, wallHandBlend = 0.25f, wallHandMinH = 200.f, wallHandPromptReach = 1.f;
 };
 static SteerCfg g_steer;
 struct HandAnim { uintptr_t seq; char pc[8]; bool right; };          // wall-hand animation per character folder (PC0000, PC0009, ...)
@@ -289,7 +289,10 @@ static const char* RELEASE_INI =
     "; seconds into that animation to hold (stay within its length above)\r\n"
     "wall_hand_time=0.8\r\n"
     "; 0 = hold that pose; above 0 = play the animation at this speed instead\r\n"
-    "wall_hand_rate=0\r\n";
+    "wall_hand_rate=0\r\n"
+    "; prompt_reach used while the hands-on-wall pose shows, so a climbable wall offers its prompt from there\r\n"
+    "; (1 = the game's normal distance)\r\n"
+    "wall_hand_prompt_reach=1\r\n";
 
 static bool LoadIni() {
     wchar_t path[MAX_PATH]; IniPath(path, L"TraversalSpeed.ini");
@@ -419,6 +422,9 @@ static bool LoadIni() {
     if (!GetPrivateProfileStringW(L"traversal", L"wall_hand_min_height", L"", v, 32, path)) WritePrivateProfileStringW(L"traversal", L"wall_hand_min_height", L"200", path);
     GetPrivateProfileStringW(L"traversal", L"wall_hand_min_height", L"200", v, 32, path); sc.wallHandMinH = (float)_wtof(v);
     if (!(sc.wallHandMinH >= 50.f && sc.wallHandMinH <= 600.f)) sc.wallHandMinH = 200.f;
+    if (!GetPrivateProfileStringW(L"traversal", L"wall_hand_prompt_reach", L"", v, 32, path)) WritePrivateProfileStringW(L"traversal", L"wall_hand_prompt_reach", L"1", path);
+    GetPrivateProfileStringW(L"traversal", L"wall_hand_prompt_reach", L"1", v, 32, path); sc.wallHandPromptReach = (float)_wtof(v);
+    if (!(sc.wallHandPromptReach >= 0.f && sc.wallHandPromptReach <= 4.f)) sc.wallHandPromptReach = 1.f;
     GetPrivateProfileStringW(L"traversal", L"roll_block", L"0.45", v, 32, path); sc.rollBlock = (float)_wtof(v);
     if (!(sc.rollBlock >= 0.f && sc.rollBlock <= 2.f)) sc.rollBlock = 0.45f;
     g_steer = sc;
@@ -1090,6 +1096,14 @@ static uint32_t FindDefaultSlot(uintptr_t ai) {
     return 0;
 }
 static bool g_handOn = false; static uintptr_t g_handAi = 0;
+static float* g_prSeen = nullptr; static float* g_prMul = nullptr;   // prompt reach stub data (see InstallPromptReach)
+// prompt reach multiplier in use: prompt_reach normally, wall_hand_prompt_reach while the hands-on-wall pose shows
+// (so a climbable wall offers its prompt from the pose at the game's normal distance)
+static float PromptMulWanted() {
+    if (!g_enabled) return 1.f;
+    return g_handOn ? g_steer.wallHandPromptReach : g_steer.promptReach;
+}
+static void ApplyPromptMul() { if (g_prMul) *g_prMul = PromptMulWanted(); }
 static void PlayWallHand(const SteerTargets& t, uintptr_t seq, const SteerCfg& sc) {
     uintptr_t fn = g_playSlotFn.load(); alignas(16) uint8_t parms[256];
     if (!fn || !g_defaultSlotName) return;
@@ -1108,11 +1122,11 @@ static void PlayWallHand(const SteerTargets& t, uintptr_t seq, const SteerCfg& s
     if (pBI >= 0) memcpy(parms + pBI, &bi, 4); if (pBO >= 0) memcpy(parms + pBO, &bo, 4); memcpy(parms + pR, &rate, 4);
     if (pL >= 0) memcpy(parms + pL, &loops, 4); if (pBT >= 0) memcpy(parms + pBT, &trig, 4); if (pT >= 0) memcpy(parms + pT, &st, 4);
     g_peOrig(reinterpret_cast<void*>(t.ai), reinterpret_cast<void*>(fn), parms);
-    g_handOn = true; g_handAi = t.ai;
+    g_handOn = true; g_handAi = t.ai; ApplyPromptMul();
 }
 static void StopWallHand(const SteerCfg& sc) {
     uintptr_t fn = g_stopSlotFn.load(); alignas(16) uint8_t parms[64];
-    g_handOn = false;
+    g_handOn = false; ApplyPromptMul();
     if (!fn || !g_handAi || !g_defaultSlotName) return;
     int32_t sz = 0; Rd(fn + 0x58, sz); if (sz <= 0 || sz > (int)sizeof(parms)) return;
     static int pB = -2, pS;
@@ -1311,20 +1325,30 @@ static void GameTick() {
         if (sp > m.peak && d < 80.f) m.peak = sp;
         bool deflected = m.dirSet && !m.edgeStop && sp > 200.f && d < 80.f && (dx * m.dirX + dy * m.dirY) < 0.9f * d;
         if (deflected) {
-            // the player steering the roll is not a deflection: follow it (later edge checks use the new direction)
+            // the player steering the roll is not a deflection: follow it (later edge checks use the new direction).
+            // Steering = the stick has turned away from the roll's start direction (> 25 deg) and the new movement
+            // follows the stick. A stick still pointing where the roll started (at the edge) means the game deflected it.
             float right, fwd; uintptr_t cm = 0; float camYaw = 0;
             if (ReadInput(sc, right, fwd) && t.offCamMgr >= 0 && t.offCamYaw >= 0 && Rd(t.pc + t.offCamMgr, cm) && cm && Rd(cm + t.offCamYaw, camYaw)) {
                 float stickYaw = camYaw + std::atan2(right, fwd) * 57.2957795f, moveYaw = std::atan2(dy, dx) * 57.2957795f;
-                if (std::fabs(Wrap(stickYaw - moveYaw)) < 40.f) { m.dirX = dx / d; m.dirY = dy / d; deflected = false; }
+                float startYaw = std::atan2(m.dirY, m.dirX) * 57.2957795f;
+                float offStart = std::fabs(Wrap(stickYaw - startYaw)), offMove = std::fabs(Wrap(stickYaw - moveYaw));
+                if (offStart > 25.f && offMove < offStart && offMove < 40.f) { m.dirX = dx / d; m.dirY = dy / d; deflected = false; }
             }
         }
         if (deflected) {
-            // and only at a real edge: a drop of more than 25 cm just ahead along the original direction
-            const float halfH = 96.f; float rad = CapsuleRadius(t);
-            float p[3] = { pos[0] + m.dirX * (rad + 25.f), pos[1] + m.dirY * (rad + 25.f), pos[2] + 50.f };
-            TraceHit h = TraceDown(t, p, 50.f + halfH + sc.maxDrop + 100.f);
-            float drop = h.hit ? (pos[2] - halfH) - h.z : 99999.f;
-            if (h.ok && drop <= 25.f) deflected = false;
+            // and only at a real edge: a drop of more than 15 cm somewhere just ahead along the start direction
+            // (sampled at three distances, so a sloped lip still counts)
+            const float halfH = 96.f; float rad = CapsuleRadius(t), maxDropSeen = -99999.f; bool anyOk = false;
+            for (float ahead : { rad + 25.f, rad + 60.f, rad + 100.f }) {
+                float p[3] = { pos[0] + m.dirX * ahead, pos[1] + m.dirY * ahead, pos[2] + 50.f };
+                TraceHit h = TraceDown(t, p, 50.f + halfH + sc.maxDrop + 100.f);
+                if (!h.ok) continue;
+                anyOk = true;
+                float drop = h.hit ? (pos[2] - halfH) - h.z : 99999.f;
+                if (drop > maxDropSeen) maxDropSeen = drop;
+            }
+            if (anyOk && maxDropSeen <= 15.f) deflected = false;
         }
         if (deflected) {
             float cx = m.dirX * d - dx, cy = m.dirY * d - dy, to[3] = { pos[0] + cx, pos[1] + cy, pos[2] };
@@ -1707,7 +1731,6 @@ static void InstallActReqHook(uintptr_t base) {
 // multiplies it by prompt_reach (1 = normal, smaller = the prompt appears closer to the edge).
 static constexpr uintptr_t RVA_PromptReach = 0x12FF4F4;
 static const uint8_t PR_ORIG[9] = { 0xC5, 0xFA, 0x10, 0x8C, 0x24, 0x68, 0x03, 0x00, 0x00 };
-static float* g_prSeen = nullptr; static float* g_prMul = nullptr;
 static void InstallPromptReach(uintptr_t base) {
     uint8_t* t = reinterpret_cast<uint8_t*>(base + RVA_PromptReach);
     if (memcmp(t, PR_ORIG, sizeof(PR_ORIG)) != 0) { Log("prompt reach instruction differs - prompt_reach off"); return; }
@@ -1735,8 +1758,11 @@ static void InstallPromptReach(uintptr_t base) {
 }
 static void PromptReachTick() {
     if (!g_prMul) return;
-    float want = g_enabled ? g_steer.promptReach : 1.f;
-    if (*g_prMul != want) { *g_prMul = want; Log("prompt reach multiplier now %.2f", want); }
+    static float lastBase = -1.f;
+    float base = g_enabled ? g_steer.promptReach : 1.f;   // logged only when the setting changes, not per wall pose
+    if (base != lastBase) { lastBase = base; Log("prompt reach multiplier now %.2f (%.2f in the hands-on-wall pose)", base, g_enabled ? g_steer.wallHandPromptReach : 1.f); }
+    float want = PromptMulWanted();
+    if (*g_prMul != want) *g_prMul = want;
     static float lastSeen = -1.f; static unsigned tick = 0;
     if (++tick % 10 == 0 && *g_prSeen != lastSeen) { lastSeen = *g_prSeen; Log("prompt reach: game value %.4f, used %.4f", lastSeen, lastSeen * want); }
 }
