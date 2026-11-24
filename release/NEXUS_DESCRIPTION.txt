@@ -1,0 +1,64 @@
+[size=5][b]A Bit Better Traversal Movement[/b][/size]
+[i]For Final Fantasy VII Rebirth (PC, game version 1.0.0.5)[/i]
+
+Moving around the world in Rebirth can feel locked in and stiff: every ledge plays a full animation before you get control back, you can't steer a drop, rolls stop dead at small edges, and Cloud happily runs in place against walls. This mod smooths all of that out without changing how the game looks, and every part of it can be tuned or turned off while you play.
+
+[size=4][b]Main features[/b][/size]
+[list]
+[*][b]Faster traversal[/b] - vaults, climbs, jump-downs and cliff stops play faster (separately tunable), so you get control back sooner. The small automatic hop over steps keeps its normal speed so it never looks frozen.
+[*][b]Steer while falling[/b] - turn toward where you push the stick (or WASD) during drops and for a moment after landing, like normal walking.
+[*][b]Land where you fall[/b] - no more snapping onto the game's pre-planned landing spot. Where a jump has to reach a specific platform on another level, the game's placement is kept.
+[*][b]Landing momentum[/b] - keep part of your speed after landing instead of stopping on the spot.
+[*][b]Longer dodge roll[/b] outside combat, closer to the combat one.
+[*][b]Rolls don't turn into climbs[/b] - rolling at a wall no longer vaults you up it mid-roll. Standing next to a ledge, the button still climbs as usual.
+[*][b]Roll off small ledges[/b] - a roll carries you over small cliffs and edges with its own speed instead of stopping at the edge. Big drops and out-of-bounds edges still stop you.
+[*][b]Breathing room between traversals[/b] - a short pause after a big traversal, so two ledges close together don't cut each other's animations short.
+[*][b]Acrobacias prompt closer to the edge[/b] - the prompt (and the button traversal) only kicks in when you're actually near the ledge. Fully adjustable.
+[*][b]No running in place against walls[/b] - push into a wall and the character stops instead of running on the spot. Low obstacles you can hop, small props and other characters don't count.
+[*][b]Hands on the wall[/b] - against a tall wall, the character turns to face it and rests both hands on it.
+[*][b]Everything live-tunable[/b] - one commented ini file, changes apply within a second while the game runs.
+[/list]
+
+[size=4][b]Installation[/b][/size]
+[list=1]
+[*]Open the game folder: Steam > Final Fantasy VII Rebirth > right-click > Manage > Browse local files.
+[*]Copy the [b]End[/b] folder from the archive into it, merging folders. You should end up with:
+[code]<game folder>\End\Binaries\Win64\dwmapi.dll
+<game folder>\End\Binaries\Win64\TraversalSpeed.ini[/code]
+[*]Start the game. [b]TraversalSpeed.log[/b] appears next to the dll; its first lines confirm the mod loaded.
+[/list]
+[b]Uninstall:[/b] delete dwmapi.dll (and TraversalSpeed.ini / TraversalSpeed.log) from End\Binaries\Win64.
+
+[b]Settings:[/b] edit [b]End\Binaries\Win64\TraversalSpeed.ini[/b] while the game runs. Every option is explained in the file; [i]enabled=0[/i] turns the whole mod off.
+
+[size=4][b]Compatibility[/b][/size]
+[list]
+[*][b]Game version 1.0.0.5 only.[/b] On any other version the mod detects it, says so in the log and stays inactive - it won't break anything.
+[*]Loads through [b]dwmapi.dll[/b], so it conflicts with any other mod that also ships a dwmapi.dll. It works alongside mods that use other loader files.
+[*]No game files are modified - remove the dll and the game is vanilla again.
+[*]Linux / Steam Deck (Proton): untested. You will likely need the launch option [i]WINEDLLOVERRIDES="dwmapi=n,b" %command%[/i]
+[/list]
+
+[size=4][b]Disclaimer - where it might go wrong[/b][/size]
+This mod changes how the character moves in a game full of hand-placed jumps, ledges and scripted spots, and it has been tested mostly with Cloud in the open world. Things I expect could still misbehave:
+[list]
+[*][b]Landing where you fall[/b] - in dungeons, platforming or scripted jumps that must land on one exact spot, some jumps may behave oddly. If one does, set [i]free_fall=0[/i] and please tell me where.
+[*][b]Rolling off ledges[/b] - very rough or unusual edges may still stop a roll. Out-of-bounds protection relies on [i]max_drop[/i]: deeper drops always stop you at the edge.
+[*][b]Wall stop[/b] - may occasionally miss a wall, or stop you against odd geometry.
+[*][b]Hands on the wall[/b] - it reuses a door-push animation, so it can clip or look off on uneven walls ([i]wall_hand=0[/i] turns it off).
+[*][b]Shorter prompt reach[/b] also means standing closer to a ledge for the button to start a climb or drop.
+[*]Other party members, story segments, chocobo and vehicle sections have seen less testing.
+[/list]
+
+[size=4][b]Source code[/b][/size]
+Open source under the MIT License: [url=https://github.com/xavitolavi/a-bit-better-traversal-movement]github.com/xavitolavi/a-bit-better-traversal-movement[/url]. The dll carries version details and a self-signed code signature (publisher XaviFlorit).
+
+[size=4][b]Feedback and bug reports[/b][/size]
+Feedback is very welcome, this is the first release! If something feels wrong or breaks, please post in the comments or the bugs tab with:
+[list]
+[*]what you were doing and where (region / chapter),
+[*]any settings you changed,
+[*]the file [b]TraversalSpeed.log[/b] from End\Binaries\Win64,
+[*]a short video if you can - it helps a lot.
+[/list]
+Ideas for things that still feel clunky are welcome too.

@@ -1,0 +1,26 @@
+# Only the mod's source, build scripts and release texts are tracked. Everything else in this folder
+# (game-derived files, research/probe tools, builds, backups) stays local.
+/*
+!/.gitignore
+!/LICENSE
+!/README.md
+!/BUILDING.md
+!/dll/
+!/tools/
+!/release/
+/dll/*
+!/dll/TraversalSpeed.cpp
+!/dll/build.bat
+!/dll/dwmapi.def
+!/dll/dwmapi_proxy.asm
+!/dll/dwmapi_proxy.inc
+!/dll/version.rc
+/tools/*
+!/tools/gen_dwmapi_proxy.py
+!/tools/sign_dll.ps1
+!/tools/make_release.py
+!/tools/TraversalMovement-codesign.cer
+/release/*
+!/release/README.txt
+!/release/TraversalSpeed.ini
+!/release/NEXUS_DESCRIPTION.txt
