@@ -1,0 +1,15 @@
+A Bit Better Traversal Movement - changelog
+
+1.1.0 (2026-11-24)
+- New speed groups, each its own [speed] key: climb_wall 1.25, ladder 1.25, rope 1.2 (ropes, poles, zip line
+  get-on/off, grappling hook), squeeze 1.3 (narrow gaps, crawl spaces). Rope swings and the zip line ride stay normal.
+- Snappier locomotion: run_start 1.2, run_stop 1.25, turn 1.25 (180-degree turns while running, turning on the spot).
+  Running and walking loops are unchanged.
+- [speed] custom=Prefix:rate,... for any animation family.
+- Speeds now also apply to the field-action animations (Motion/FieldAction), for every party member.
+- An existing TraversalSpeed.ini keeps your values; the new keys are added on the first start.
+
+1.0.0 (2026-11-24)
+- First release: faster traversal, steering in the air and after landing, free landing, landing momentum, longer
+  off-combat roll, rolls don't turn into climbs, roll off small ledges, traversal cooldown, closer Acrobacias prompt
+  (normal distance in the hands-on-wall pose), wall stop, hands on the wall, camera follows falls.

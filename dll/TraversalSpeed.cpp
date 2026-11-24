@@ -22,6 +22,7 @@
 #include <cwchar>
 #include <unordered_map>
 #include <string>
+#include <vector>
 #include <atomic>
 #include <cmath>
 #include <cwctype>
@@ -107,11 +108,17 @@ static std::string ObjName(uintptr_t obj) {
 }
 
 // ---------------------------------------------------------------- settings (TraversalSpeed.ini, reread when saved)
-enum Group { G_NONE = -1, G_UP, G_DOWN, G_CLIFF, G_LAND, G_COUNT, G_KEEP = G_COUNT };   // G_KEEP: [speed] normal_speed, always 1
+// G_KEEP: [speed] normal_speed, always 1.  G_CUSTOM + i: entry i of [speed] custom (its own rate)
+enum Group { G_NONE = -1, G_UP, G_DOWN, G_CLIFF, G_LAND, G_CLIMB, G_LADDER, G_ROPE, G_SQUEEZE, G_START, G_STOP, G_PIVOT,
+             G_COUNT, G_KEEP = G_COUNT, G_CUSTOM };
 static std::string g_keepNormal = "N_Jump03,N_Jump04";   // comma-separated name prefixes kept at the normal speed
-static const wchar_t* GROUP_KEY[G_COUNT] = { L"up", L"down", L"cliff_stop", L"land" };
-static const wchar_t* GROUP_DEF[G_COUNT] = { L"1.1", L"1.35", L"1.35", L"1.15" };
-static float g_speed[G_COUNT] = { 1.1f, 1.35f, 1.35f, 1.15f };
+static const wchar_t* GROUP_KEY[G_COUNT] = { L"up", L"down", L"cliff_stop", L"land", L"climb_wall", L"ladder", L"rope", L"squeeze",
+                                             L"run_start", L"run_stop", L"turn" };
+static const wchar_t* GROUP_DEF[G_COUNT] = { L"1.1", L"1.35", L"1.35", L"1.15", L"1.25", L"1.25", L"1.2", L"1.3", L"1.2", L"1.25", L"1.25" };
+static const char* GROUP_LOG[G_COUNT] = { "up", "down", "cliff stop", "land", "climb wall", "ladder", "rope", "squeeze", "run start", "run stop", "turn" };
+static float g_speed[G_COUNT] = { 1.1f, 1.35f, 1.35f, 1.15f, 1.25f, 1.25f, 1.2f, 1.3f, 1.2f, 1.25f, 1.25f };
+struct CustomRate { std::string prefix; float rate; };
+static std::vector<CustomRate> g_custom;   // [speed] custom=Prefix:rate,Prefix:rate (any animation family, overrides the groups)
 static bool g_enabled = true;
 static FILETIME g_iniTime = {};
 static unsigned g_iniGen = 0;
@@ -226,9 +233,26 @@ static const char* RELEASE_INI =
     "cliff_stop=1.42\r\n"
     "; landing animations after a drop\r\n"
     "land=1\r\n"
+    "; climbing walls with handholds: getting on and off, moving and jumping between holds\r\n"
+    "climb_wall=1.25\r\n"
+    "; ladders: getting on, climbing up and down, getting off\r\n"
+    "ladder=1.25\r\n"
+    "; ropes, poles, zip lines (getting on and off) and the grappling hook; rope swings and the zip line ride stay normal\r\n"
+    "rope=1.2\r\n"
+    "; squeezing through narrow gaps and crawl spaces\r\n"
+    "squeeze=1.3\r\n"
+    "; starting to run or sprint (including the turn when you start in another direction)\r\n"
+    "run_start=1.2\r\n"
+    "; stopping from a run or sprint, and slowing from a sprint to a walk\r\n"
+    "run_stop=1.25\r\n"
+    "; turning around while running, and turning on the spot\r\n"
+    "turn=1.25\r\n"
     "; animations that always play at normal speed (name prefixes, comma-separated): the small automatic hop up or down a\r\n"
     "; step while walking looks frozen for a moment when sped up\r\n"
     "normal_speed=N_Jump03,N_Jump04\r\n"
+    "; your own speeds for any animation family: name prefix : speed, comma-separated, e.g. N_Narrow01:1.5,N_LadderU:1.4\r\n"
+    "; (overrides the groups above; normal_speed still wins)\r\n"
+    "custom=\r\n"
     "\r\n"
     "[steer]\r\n"
     "; steer drops and landing rolls toward where you push the stick (or WASD), like normal walking\r\n"
@@ -358,6 +382,8 @@ static bool LoadIni() {
     wchar_t v[32];
     g_enabled = GetPrivateProfileIntW(L"global", L"enabled", 1, path) != 0;
     for (int g = 0; g < G_COUNT; ++g) {
+        if (g >= G_CLIMB && !GetPrivateProfileStringW(L"speed", GROUP_KEY[g], L"", v, 32, path))   // ini before 1.1: add the new groups
+            WritePrivateProfileStringW(L"speed", GROUP_KEY[g], GROUP_DEF[g], path);
         GetPrivateProfileStringW(L"speed", GROUP_KEY[g], GROUP_DEF[g], v, 32, path);
         float s = static_cast<float>(_wtof(v));
         g_speed[g] = (s >= 0.25f && s <= 4.f) ? s : 1.f;
@@ -370,6 +396,24 @@ static bool LoadIni() {
         }
         std::string k; for (wchar_t* c = kn; *c; ++c) if (*c != L' ') k += (char)*c;
         g_keepNormal = k;
+    }
+    {   // [speed] custom=N_Narrow01:1.5,N_RopeSwing:1  (name prefix : speed, comma-separated)
+        wchar_t cu[512] = {};
+        if (!GetPrivateProfileStringW(L"speed", L"custom", L"\x01", cu, 512, path) || cu[0] == 1) {
+            WritePrivateProfileStringW(L"speed", L"custom", L"", path); cu[0] = 0;
+        }
+        std::string s; for (wchar_t* c = cu; *c; ++c) if (*c != L' ') s += (char)*c;
+        std::vector<CustomRate> list;
+        for (size_t a = 0; a < s.size() && list.size() < 64; ) {
+            size_t b = s.find(',', a); if (b == std::string::npos) b = s.size();
+            std::string item = s.substr(a, b - a); size_t colon = item.find(':');
+            if (colon != std::string::npos && colon > 0) {
+                float r = (float)atof(item.c_str() + colon + 1);
+                if (r >= 0.25f && r <= 4.f) list.push_back({ item.substr(0, colon), r });
+            }
+            a = b + 1;
+        }
+        g_custom.swap(list);
     }
     SteerCfg sc;
     sc.enabled = GetPrivateProfileIntW(L"steer", L"enabled", 1, path) != 0;
@@ -440,6 +484,9 @@ static bool LoadIni() {
         " | roll x%.2f %.2fs off_ledges=%d | landing momentum %.2f %.2fs | roll_vault=%d roll_block=%.2fs cooldown=%.2fs",
         g_enabled, g_speed[G_UP], g_speed[G_DOWN], g_speed[G_LAND], g_speed[G_CLIFF], sc.enabled, sc.air, sc.landing, sc.window, sc.rate, sc.keys,
         sc.rollDist, sc.rollTime, sc.offLedges, sc.landKeep, sc.landTime, sc.rollVault, sc.rollBlock, sc.cooldown);
+    Log("settings: climb_wall=%.2f ladder=%.2f rope=%.2f squeeze=%.2f run_start=%.2f run_stop=%.2f turn=%.2f custom=%d entries",
+        g_speed[G_CLIMB], g_speed[G_LADDER], g_speed[G_ROPE], g_speed[G_SQUEEZE], g_speed[G_START], g_speed[G_STOP], g_speed[G_PIVOT],
+        (int)g_custom.size());
     return true;
 }
 
@@ -447,7 +494,26 @@ static bool LoadIni() {
 static bool DigitAt(const std::string& s, size_t i) { return i < s.size() && s[i] >= '0' && s[i] <= '9'; }
 static bool Starts(const std::string& s, const char* p) { return s.compare(0, strlen(p), p) == 0; }
 
+// N_Run01_1_L180 -> true for prefix "N_Run" (two digits, then the phase digit)
+static bool Phase(const std::string& n, const char* fam, char phase) {
+    size_t f = strlen(fam);
+    return Starts(n, fam) && DigitAt(n, f) && DigitAt(n, f + 1) && n.size() > f + 3 && n[f + 2] == '_' && n[f + 3] == phase;
+}
+
 static Group Classify(const std::string& n) {
+    // climb walls, ladders, ropes, narrow gaps (Motion/FieldAction/<Action>00/PCxxxx_*/); idles and the physics-timed rides stay normal
+    if (Starts(n, "N_ClimbIdle")) return G_NONE;
+    if (Starts(n, "N_ClimbStart") || Starts(n, "N_ClimbWalk") || Starts(n, "N_ClimbJump") || Starts(n, "N_ClimbEnd") ||
+        Starts(n, "N_ClimbEND") || Starts(n, "N_ClimbHang")) return G_CLIMB;
+    if (Starts(n, "N_Ladder")) return G_LADDER;
+    if (Starts(n, "N_RopeSwing") || Starts(n, "N_ZipLine01_1")) return G_NONE;
+    if (Starts(n, "N_Rope") || Starts(n, "N_Pole") || Starts(n, "N_ZipLine") || Starts(n, "N_HookShot")) return G_ROPE;
+    if (Starts(n, "N_Narrow") || Starts(n, "N_Sukima") || Starts(n, "N_Tunnel") || Starts(n, "N_Kuguri")) return G_SQUEEZE;
+    // locomotion transitions: run/sprint starts (_0), stops (_2, _3), 180 turns while running, turning on the spot; loops (_1) stay normal
+    if (Phase(n, "N_Run", '0') || Phase(n, "N_Dash", '0') || Starts(n, "N_Accel")) return G_START;
+    if (Phase(n, "N_Run", '2') || Phase(n, "N_Dash", '2') || Phase(n, "N_Dash", '3') || Starts(n, "N_DashToWalk") || Starts(n, "N_Brake"))
+        return G_STOP;
+    if ((Phase(n, "N_Run", '1') && (n.find("180") != std::string::npos)) || (Starts(n, "N_Turn") && DigitAt(n, 6))) return G_PIVOT;
     if (Starts(n, "N_CliffStop")) return G_CLIFF;
     if (Starts(n, "N_ClimbOver")) return G_UP;
     if (Starts(n, "N_Climb") && DigitAt(n, 7)) return G_UP;
@@ -524,7 +590,7 @@ static uintptr_t g_resParamObj = 0;                // /Game/DataObject/Resident/
 static void Pass() {
     bool changed = LoadIni();
     if (changed) g_seen.clear();   // re-classify everything (normal_speed may have changed)
-    unsigned matched = 0, written = 0, newly = 0, perGroup[G_COUNT] = {}, keptNormal = 0;
+    unsigned matched = 0, written = 0, newly = 0, perGroup[G_COUNT] = {}, keptNormal = 0, customN = 0;
     std::unordered_map<uintptr_t, Entry> next; next.reserve(g_seen.size() + 64);
     uintptr_t charRoots[48]; int charN = 0;
     uintptr_t pc = 0;
@@ -628,7 +694,11 @@ static void Pass() {
             int32_t num = 0; Rd(obj + OFF_UObject_Name + 4, num);
             if (num > 0) nm += "_" + std::to_string(num - 1);
             Group g = Classify(nm);
-            if (g != G_NONE && outer && Starts(ObjName(outer), "/Game/Motion/Player/")) {
+            std::string op = outer ? ObjName(outer) : std::string();
+            bool ours = Starts(op, "/Game/Motion/Player/") || Starts(op, "/Game/Motion/FieldAction/");
+            if (ours) for (size_t i = 0; i < g_custom.size(); ++i)
+                if (Starts(nm, g_custom[i].prefix.c_str())) { g = (Group)(G_CUSTOM + (int)i); break; }
+            if (g != G_NONE && ours) {
                 e.group = (int8_t)g;
                 size_t a = 0;
                 while (a < g_keepNormal.size()) {
@@ -641,16 +711,20 @@ static void Pass() {
         }
         next[obj] = e;
         if (e.group < 0) return;
-        ++matched; if (e.group < G_COUNT) ++perGroup[e.group]; else ++keptNormal;
-        float want = (g_enabled && e.group < G_COUNT) ? g_speed[e.group] : 1.f, cur = 0.f;
+        ++matched; if (e.group < G_COUNT) ++perGroup[e.group]; else if (e.group == G_KEEP) ++keptNormal; else ++customN;
+        float want = 1.f, cur = 0.f;
+        if (g_enabled && e.group < G_COUNT) want = g_speed[e.group];
+        else if (g_enabled && e.group >= G_CUSTOM && e.group - G_CUSTOM < (int)g_custom.size()) want = g_custom[e.group - G_CUSTOM].rate;
         if (Rd(obj + g_rateOff, cur) && cur != want && WrFloat(obj + g_rateOff, want)) ++written;
     });
     g_seen.swap(next);
     { int back = 1 - g_charFront.load(); memcpy(g_charRoots[back], charRoots, sizeof(uintptr_t) * charN); g_charCount[back].store(charN); g_charFront.store(back); }
     if (pc != g_pc.load()) { g_pc.store(pc); Log("player controller %p", (void*)pc); }
-    if (written || changed)
-        Log("traversal animations: %u loaded (up %u, down %u, land %u, cliff stop %u, normal speed %u), %u updated", matched,
-            perGroup[G_UP], perGroup[G_DOWN], perGroup[G_LAND], perGroup[G_CLIFF], keptNormal, written);
+    if (written || changed) {
+        char buf[512]; int p = 0;
+        for (int g = 0; g < G_COUNT; ++g) p += snprintf(buf + p, sizeof(buf) - p, "%s %u, ", GROUP_LOG[g], perGroup[g]);
+        Log("animations: %u loaded (%scustom %u, normal speed %u), %u updated", matched, buf, customN, keptNormal, written);
+    }
     (void)newly;
 }
 
@@ -2199,7 +2273,7 @@ static void ArmWatchpoint() {
 }
 
 static DWORD WINAPI MainThread(LPVOID) {
-    Log("A Bit Better Traversal Movement v1.0.0 running, base=%p", (void*)g_base);
+    Log("A Bit Better Traversal Movement v1.1.0 running, base=%p", (void*)g_base);
     for (int tries = 0; !FindAnimSequenceClass(); ++tries) {
         if (tries == 600) { Log("AnimSequence class or RateScale not found - the mod is off"); return 0; }
         Sleep(1000);
@@ -2312,7 +2386,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID) {
         if (!m || GetLastError() == ERROR_ALREADY_EXISTS) return TRUE;
         wchar_t path[MAX_PATH]; IniPath(path, L"TraversalSpeed.log");
         g_log = _wfopen(path, L"w");
-        Log("A Bit Better Traversal Movement v1.0.0 loaded");
+        Log("A Bit Better Traversal Movement v1.1.0 loaded");
         g_base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
         if (!IsSupportedBuild(g_base)) {
             Log("this game version is not supported (game update?) - the mod is off, the game runs unmodified");

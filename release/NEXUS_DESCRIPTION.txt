@@ -6,6 +6,8 @@ Moving around the world in Rebirth can feel locked in and stiff: every ledge pla
 [size=4][b]Main features[/b][/size]
 [list]
 [*][b]Faster traversal[/b] - vaults, climbs, jump-downs and cliff stops play faster (separately tunable), so you get control back sooner. The small automatic hop over steps keeps its normal speed so it never looks frozen.
+[*][b]Faster climbing sections (new in 1.1)[/b] - climbing walls, ladders, ropes, poles, zip lines, the grappling hook and narrow gaps play faster, with much shorter pauses between handholds.
+[*][b]Snappier running (new in 1.1)[/b] - starting to run, stopping and turning around play faster, so the character reacts sooner to the stick. The running animation itself is unchanged.
 [*][b]Steer while falling[/b] - turn toward where you push the stick (or WASD) during drops and for a moment after landing, like normal walking.
 [*][b]Land where you fall[/b] - no more snapping onto the game's pre-planned landing spot. Where a jump has to reach a specific platform on another level, the game's placement is kept.
 [*][b]Landing momentum[/b] - keep part of your speed after landing instead of stopping on the spot.
@@ -18,6 +20,15 @@ Moving around the world in Rebirth can feel locked in and stiff: every ledge pla
 [*][b]Hands on the wall[/b] - against a tall wall, the character turns to face it and rests both hands on it. If that wall can be climbed, the Acrobacias prompt shows from there at the game's normal distance.
 [*][b]Camera follows the fall[/b] - when you roll or drop off a ledge, the camera now follows you down instead of hanging back and catching up only after you land.
 [*][b]Everything live-tunable[/b] - one commented ini file, changes apply within a second while the game runs (the [i][camera][/i] options need a game restart).
+[/list]
+
+[size=4][b]What's new in 1.1[/b][/size]
+[list]
+[*]Climbing walls, ladders, ropes/poles/zip lines/grappling hook and narrow gaps play faster ([i]climb_wall, ladder, rope, squeeze[/i]).
+[*]Snappier run starts, stops and turns ([i]run_start, run_stop, turn[/i]).
+[*][i]custom=[/i] sets your own speed for any animation family.
+[*]Works for every party member.
+[*][b]Updating from 1.0:[/b] just replace dwmapi.dll. Your ini keeps your values and gets the new keys on the first start.
 [/list]
 
 [size=4][b]Installation[/b][/size]
@@ -47,6 +58,7 @@ This mod changes how the character moves in a game full of hand-placed jumps, le
 [*][b]Rolling off ledges[/b] - very rough or unusual edges may still stop a roll. Out-of-bounds protection relies on [i]max_drop[/i]: deeper drops always stop you at the edge.
 [*][b]Wall stop[/b] - may occasionally miss a wall, or stop you against odd geometry.
 [*][b]Hands on the wall[/b] - it reuses a door-push animation, so it can clip or look off on uneven walls ([i]wall_hand=0[/i] turns it off).
+[*][b]Faster run starts, stops and turns[/b] - if the feet look like they slide somewhere, lower [i]run_start[/i], [i]run_stop[/i] or [i]turn[/i].
 [*][b]Shorter prompt reach[/b] also means standing closer to a ledge for the button to start a climb or drop.
 [*]Other party members, story segments, chocobo and vehicle sections have seen less testing.
 [/list]

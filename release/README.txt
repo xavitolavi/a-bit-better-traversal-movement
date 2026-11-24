@@ -1,9 +1,20 @@
-A Bit Better Traversal Movement  v1.0.0
+A Bit Better Traversal Movement  v1.1.0
 Final Fantasy VII Rebirth (PC, game version 1.0.0.5)
 
-Makes moving around the field feel less locked and stiff: faster traversal animations, steering while falling,
+Makes moving around the field feel less locked and stiff: faster traversal animations (vaults, drops, climbing walls,
+ladders, ropes, narrow gaps), snappier run starts, stops and turns, steering while falling,
 longer dodge rolls that can carry you off small ledges, landing where you actually fall, no running in place
 against walls, a camera that follows you down when you drop off a ledge, and more. Every setting is in TraversalSpeed.ini and applies live while you play.
+
+WHAT'S NEW IN 1.1
+- Climbing walls, ladders, ropes/poles/zip lines/grappling hook and narrow gaps play faster ([speed] climb_wall,
+  ladder, rope, squeeze). The pauses between handholds on climbing walls are much shorter.
+- Snappier running: starting to run, stopping and turning around play faster ([speed] run_start, run_stop, turn).
+  The running loop itself is unchanged.
+- [speed] custom= lets you set your own speed for any animation family.
+- Applies to every party member.
+Updating from 1.0: just replace dwmapi.dll. Your TraversalSpeed.ini keeps your values and gets the new keys added on
+the first start.
 
 INSTALL
 1. Open the game folder: Steam > Final Fantasy VII Rebirth > right-click > Manage > Browse local files.
@@ -34,6 +45,8 @@ KNOWN LIMITS / WHERE IT MIGHT GO WRONG
   max_drop (drops deeper than that always stop you at the edge).
 - Wall stop: may occasionally miss a wall, or stop you against unusual geometry.
 - Hands-on-wall pose: it reuses a door-push animation, so it can clip or look off on uneven walls (wall_hand=0 turns it off).
+- Faster run starts/stops/turns: if the feet look like they slide on some surface, lower run_start, run_stop or turn
+  (1 = the game's normal speed).
 - prompt_reach below 1 also means you have to be closer to a ledge for the button to start a climb or drop.
 - Mostly tested with Cloud in the open world. Other party members, story segments, chocobo and vehicle sections are
   less tested.

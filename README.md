@@ -1,7 +1,8 @@
 # A Bit Better Traversal Movement
 
 Source code of **A Bit Better Traversal Movement**, a mod for FINAL FANTASY VII REBIRTH (PC) that makes moving around the field feel less locked and stiff:
-- faster traversal animations (vaults, climbs, jump-downs, cliff stops);
+- faster traversal animations (vaults, climbs, jump-downs, cliff stops, climbing walls, ladders, ropes, narrow gaps);
+- snappier run starts, stops and turns;
 - steering while falling and right after landing;
 - landing where you actually fall, and keeping some momentum on landing;
 - longer dodge rolls outside combat that can roll off small ledges (big drops and out-of-bounds edges still stop you);
