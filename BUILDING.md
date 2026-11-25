@@ -34,7 +34,7 @@ This generates a free, self-signed code-signing certificate in your user certifi
 
 ## 2. The release zip
 ```
-python tools\make_release.py v1.1.0
+python tools\make_release.py v1.2.0
 ```
 Checks that the DLL has its version metadata and a signature, then builds `release\A Bit Better Traversal Movement\` and `release\A_Bit_Better_Traversal_Movement_v1.0.0.zip` with:
 - `End\Binaries\Win64\dwmapi.dll`

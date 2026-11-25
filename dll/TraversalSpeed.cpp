@@ -1,4 +1,4 @@
-﻿// A Bit Better Traversal Movement (shipped as dwmapi.dll) - smoother field movement for FF7 Rebirth: faster traversal
+// A Bit Better Traversal Movement (shipped as dwmapi.dll) - smoother field movement for FF7 Rebirth: faster traversal
 // animations, steering in the air and on landing, landing where you fall, landing momentum, longer dodge rolls that can
 // roll off small ledges, a closer Acrobacias prompt, no running in place against walls, and a hands-on-wall pose.
 // Settings: TraversalSpeed.ini next to the DLL (re-read live).
@@ -197,12 +197,16 @@ struct SteerCfg {
     bool enabled = true, air = true, landing = true; float window = 1.2f, rate = 180.f; char keys[4] = { 'W', 'A', 'S', 'D' };
     float rollDist = 1.3f, rollTime = 0.9f; int rollKey = VK_SPACE; float landKeep = 0.5f, landTime = 0.35f;
     bool rollVault = false, offLedges = true, freeFall = true; float cooldown = 0.2f, rollBlock = 0.45f, maxDrop = 450.f, coolMinH = 150.f, promptReach = 1.f; bool wallStop = true, wallHand = true, wallHandFlip = false; float wallHandTime = 0.3f, wallHandRate = 0.f, wallHandBlend = 0.25f, wallHandMinH = 200.f, wallHandPromptReach = 1.f;
+    float blend = 1.f, blendMin = 0.1f, locoBlend = 1.f;   // [transitions]
+    float sideAngle = 0.f;                                  // [traversal] side_angle
+    float rollVaultStart = 0.f;                             // [traversal] roll_vault_start
+    bool landCancel = false;                                // [transitions] landing_cancel
 };
 static SteerCfg g_steer;
 struct HandAnim { uintptr_t seq; char pc[8]; bool right; };          // wall-hand animation per character folder (PC0000, PC0009, ...)
 static HandAnim g_handAnims[8]; static volatile LONG g_handN = 0;
 static std::string g_handAnimName = "N_Door21_Open_Loop";   // [traversal] wall_hand_anim
-static uintptr_t g_charRoots[2][48]; static std::atomic<int> g_charFront{0}; static std::atomic<int> g_charCount[2];   // other characters' root components
+static uintptr_t g_charRoots[2][256]; static std::atomic<int> g_charFront{0}; static std::atomic<int> g_charCount[2];   // other characters' root components
 
 static int KeyCode(const wchar_t* s) {
     if (!_wcsicmp(s, L"SPACE")) return VK_SPACE;
@@ -293,6 +297,9 @@ static const char* RELEASE_INI =
     "roll_vault=0\r\n"
     "; how long (seconds) from the start of a roll traversals stay blocked\r\n"
     "roll_block=0.45\r\n"
+    "; ...except right at the start: a roll can still turn into a climb or jump-down during its first this-many seconds\r\n"
+    ";    (pressing the button close to a ledge), but not when it reaches a wall later (0 = blocked from the start)\r\n"
+    "roll_vault_start=0.15\r\n"
     "; short pause (seconds) before another traversal can start, so back-to-back ledges don't cut each other's animations\r\n"
     "cooldown=0.13\r\n"
     "; only a traversal that changes height by at least this many cm starts that pause (small step-downs chain freely)\r\n"
@@ -317,13 +324,25 @@ static const char* RELEASE_INI =
     "; prompt_reach used while the hands-on-wall pose shows, so a climbable wall offers its prompt from there\r\n"
     "; (1 = the game's normal distance)\r\n"
     "wall_hand_prompt_reach=1\r\n"
+    "; also look for a ledge this many degrees to either side of where the character faces, when there's none straight\r\n"
+    "; ahead (0 = only straight ahead, like the normal game)\r\n"
+    "side_angle=35\r\n"
     "\r\n"
     "[camera]\r\n"
     "; 1 = the camera follows the character down while falling (e.g. after rolling off a ledge) instead of catching up\r\n"
     ";     only after landing. Read once at game start: restart the game after changing these two.\r\n"
     "fall_follow=1\r\n"
     "; how quickly the camera follows height changes (the game's own value is 5)\r\n"
-    "fall_follow_speed=40\r\n";
+    "fall_follow_speed=40\r\n"
+    "\r\n"
+    "[transitions]\r\n"
+    "; how long the game blends from one animation into the next, as a share of its own blend time (1 = normal,\r\n"
+    "; smaller = snappier). blend: in and out of actions (vaults, drops, landings, climbs, rolls) and running\r\n"
+    "blend=1\r\n"
+    "; blends between the running animations themselves (start, stop, turn, walk to run)\r\n"
+    "locomotion_blend=1\r\n"
+    "; a blend is never made shorter than this many seconds (unless the game's own blend is already shorter)\r\n"
+    "blend_min=0.1\r\n";
 
 static bool LoadIni() {
     wchar_t path[MAX_PATH]; IniPath(path, L"TraversalSpeed.ini");
@@ -478,6 +497,24 @@ static bool LoadIni() {
     if (!(sc.wallHandPromptReach >= 0.f && sc.wallHandPromptReach <= 4.f)) sc.wallHandPromptReach = 1.f;
     GetPrivateProfileStringW(L"traversal", L"roll_block", L"0.45", v, 32, path); sc.rollBlock = (float)_wtof(v);
     if (!(sc.rollBlock >= 0.f && sc.rollBlock <= 2.f)) sc.rollBlock = 0.45f;
+    if (!GetPrivateProfileStringW(L"transitions", L"blend", L"", v, 32, path)) {   // ini before the blend settings
+        WritePrivateProfileStringW(L"transitions", L"blend", L"1", path);
+        WritePrivateProfileStringW(L"transitions", L"locomotion_blend", L"1", path);
+        WritePrivateProfileStringW(L"transitions", L"blend_min", L"0.1", path);
+    }
+    GetPrivateProfileStringW(L"transitions", L"blend", L"1", v, 32, path); sc.blend = (float)_wtof(v);
+    GetPrivateProfileStringW(L"transitions", L"locomotion_blend", L"1", v, 32, path); sc.locoBlend = (float)_wtof(v);
+    GetPrivateProfileStringW(L"transitions", L"blend_min", L"0.1", v, 32, path); sc.blendMin = (float)_wtof(v);
+    if (!(sc.blend >= 0.f && sc.blend <= 3.f)) sc.blend = 1.f;
+    if (!(sc.locoBlend >= 0.f && sc.locoBlend <= 3.f)) sc.locoBlend = 1.f;
+    if (!(sc.blendMin >= 0.f && sc.blendMin <= 1.f)) sc.blendMin = 0.1f;
+    if (!GetPrivateProfileStringW(L"traversal", L"side_angle", L"", v, 32, path)) WritePrivateProfileStringW(L"traversal", L"side_angle", L"35", path);
+    GetPrivateProfileStringW(L"traversal", L"side_angle", L"0", v, 32, path); sc.sideAngle = (float)_wtof(v);
+    if (!(sc.sideAngle >= 0.f && sc.sideAngle <= 90.f)) sc.sideAngle = 0.f;
+    if (!GetPrivateProfileStringW(L"traversal", L"roll_vault_start", L"", v, 32, path)) WritePrivateProfileStringW(L"traversal", L"roll_vault_start", L"0.15", path);
+    GetPrivateProfileStringW(L"traversal", L"roll_vault_start", L"0", v, 32, path); sc.rollVaultStart = (float)_wtof(v);
+    if (!(sc.rollVaultStart >= 0.f && sc.rollVaultStart <= 2.f)) sc.rollVaultStart = 0.f;
+    sc.landCancel = GetPrivateProfileIntW(L"transitions", L"landing_cancel", 0, path) != 0;
     g_steer = sc;
     ++g_iniGen;
     Log("settings: enabled=%d up=%.2f down=%.2f land=%.2f cliff_stop=%.2f | steer=%d air=%d landing=%d window=%.2fs rate=%.0f keys=%.4s"
@@ -487,6 +524,7 @@ static bool LoadIni() {
     Log("settings: climb_wall=%.2f ladder=%.2f rope=%.2f squeeze=%.2f run_start=%.2f run_stop=%.2f turn=%.2f custom=%d entries",
         g_speed[G_CLIMB], g_speed[G_LADDER], g_speed[G_ROPE], g_speed[G_SQUEEZE], g_speed[G_START], g_speed[G_STOP], g_speed[G_PIVOT],
         (int)g_custom.size());
+    Log("settings: transitions blend=%.2f locomotion_blend=%.2f blend_min=%.2f | side_angle=%.0f roll_vault_start=%.2f landing_cancel=%d", sc.blend, sc.locoBlend, sc.blendMin, sc.sideAngle, sc.rollVaultStart, (int)sc.landCancel);
     return true;
 }
 
@@ -592,7 +630,7 @@ static void Pass() {
     if (changed) g_seen.clear();   // re-classify everything (normal_speed may have changed)
     unsigned matched = 0, written = 0, newly = 0, perGroup[G_COUNT] = {}, keptNormal = 0, customN = 0;
     std::unordered_map<uintptr_t, Entry> next; next.reserve(g_seen.size() + 64);
-    uintptr_t charRoots[48]; int charN = 0;
+    uintptr_t charRoots[256]; int charN = 0; std::vector<uintptr_t> charCand; charCand.reserve(512);
     uintptr_t pc = 0;
     ForEachObject([&](uintptr_t obj) {
         uintptr_t cls = 0;
@@ -665,7 +703,8 @@ static void Pass() {
                 g_iconClass.store(obj); Log("prompt widget class %p", (void*)obj);
             }
         }
-        {   // characters (wall stop ignores them): blueprint classes like PC0002_..._C, NP0015_..._C
+        {   // characters (wall stop ignores them): any class derived from ACharacter (party, NPCs, enemies, animals),
+            // plus blueprint classes named like PC0002_..._C / NP0015_..._C
             static std::unordered_map<uintptr_t, int8_t> isChar;
             auto it = isChar.find(cls);
             int8_t c = 0;
@@ -673,11 +712,13 @@ static void Pass() {
                 std::string cn = ObjName(cls);
                 c = cn.size() > 8 && isupper((unsigned char)cn[0]) && isupper((unsigned char)cn[1]) && isdigit((unsigned char)cn[2]) && isdigit((unsigned char)cn[3]) &&
                     isdigit((unsigned char)cn[4]) && isdigit((unsigned char)cn[5]) && cn[6] == '_' && cn.compare(cn.size() - 2, 2, "_C") == 0 ? 1 : 0;
+                uintptr_t s = cls;
+                for (int d = 0; !c && s && d < 24; ++d) { if (ObjName(s) == "Character") c = 1; if (!Rd(s + OFF_UStruct_Super, s)) break; }
                 isChar.emplace(cls, c);
             } else c = it->second;
-            if (c && charN < 48) {   // AActor::RootComponent is +0x138 in this build
+            if (c && charCand.size() < 4096) {   // AActor::RootComponent is +0x138 in this build
                 uintptr_t r = 0; Rd(obj + 0x138, r);
-                if (r && !Starts(ObjName(obj), "Default__")) charRoots[charN++] = r;
+                if (r && !Starts(ObjName(obj), "Default__")) charCand.push_back(r);
             }
         }
         if (cls != g_animSeqClass) return;
@@ -718,7 +759,19 @@ static void Pass() {
         if (Rd(obj + g_rateOff, cur) && cur != want && WrFloat(obj + g_rateOff, want)) ++written;
     });
     g_seen.swap(next);
+    {   // keep the characters near the player (RootComponent +0x138, RelativeLocation +0x11C in this build): towns load hundreds
+        float pp[3] = {}; uintptr_t pawn = 0, proot = 0;
+        bool havePos = pc && Rd(pc + 0x258, pawn) && pawn && Rd(pawn + 0x138, proot) && proot && RdBytes(proot + 0x11C, pp, 12);
+        for (uintptr_t r : charCand) {
+            if (charN >= 256) break;
+            float c[3]; if (!RdBytes(r + 0x11C, c, 12)) continue;
+            float dx = c[0] - pp[0], dy = c[1] - pp[1], dz = c[2] - pp[2];
+            if (!havePos || dx * dx + dy * dy + dz * dz > 4000.f * 4000.f) continue;   // 40 m
+            charRoots[charN++] = r;
+        }
+    }
     { int back = 1 - g_charFront.load(); memcpy(g_charRoots[back], charRoots, sizeof(uintptr_t) * charN); g_charCount[back].store(charN); g_charFront.store(back); }
+    { static int lastN = -100; if (charN - lastN >= 5 || lastN - charN >= 5) { Log("characters ignored by wall stop: %d", charN); lastN = charN; } }
     if (pc != g_pc.load()) { g_pc.store(pc); Log("player controller %p", (void*)pc); }
     if (written || changed) {
         char buf[512]; int p = 0;
@@ -820,9 +873,70 @@ static VtHook g_vh[16]; static volatile LONG g_vhN = 0;
 static volatile uint8_t g_wallBlock = 0; static std::atomic<uintptr_t> g_wallAi{0};
 static constexpr int VT_AnimUpdate = 91 * 8;
 static constexpr int OFF_AI_MoveInputSize = 0x3E0 + 0x18, OFF_AI_AccelInputSize = 0x3E0 + 0x34, OFF_AI_BlendInputSpeed = 0x480;
+// ---------------------------------------------------------------- shorter blends ([transitions])
+// Pose transitions: the anim instance's bRequestedPoseTransition + RequestedPoseTransitionBlendTime(/LowPriority/Min) are
+// set by the game for one frame and turned into an inertial blend; scaled before and after the anim update.
+static int g_offPoseReq = -1, g_offPoseT[3] = { -1, -1, -1 };
+static float g_poseWritten[3] = { -2.f, -2.f, -2.f };
+static std::atomic<unsigned> g_poseScaled{0};
+static void ScalePoseRequest(uint8_t* a) {
+    if (g_offPoseReq < 0 || !g_enabled) return;
+    const float s = g_steer.blend, mn = g_steer.blendMin;
+    if (s == 1.f || !a[g_offPoseReq]) return;
+    for (int k = 0; k < 3; ++k) {
+        if (g_offPoseT[k] < 0) continue;
+        float* f = reinterpret_cast<float*>(a + g_offPoseT[k]);
+        float v = *f;
+        if (v <= 0.f || v == g_poseWritten[k]) continue;
+        float nv = v * s, floor = v < mn ? v : mn;
+        if (nv < floor) nv = floor;
+        *f = nv; g_poseWritten[k] = nv;
+        unsigned n = ++g_poseScaled;
+        if (n <= 40) Log("blend %s %.3f -> %.3f (locomotion state %u)", k == 0 ? "normal" : k == 1 ? "low-priority" : "min", v, nv,
+                         (unsigned)a[0x6EC]);
+    }
+}
+
+// Locomotion state machine crossfades: class data (BakedStateMachines -> Transitions[].CrossfadeDuration), scaled from the
+// originals; re-applied when the ini changes. Main thread only.
+static std::unordered_map<uintptr_t, float> g_xfOrig;
+static std::unordered_map<uintptr_t, unsigned> g_xfApplied;   // anim class -> ini generation applied
+static void ApplyLocoBlend(uintptr_t ai) {
+    uintptr_t cls = 0, cc = 0; if (!Rd(ai + OFF_UObject_Class, cls) || !cls || !Rd(cls + OFF_UObject_Class, cc) || !cc) return;
+    auto it = g_xfApplied.find(cls);
+    if (it != g_xfApplied.end() && it->second == g_iniGen) return;
+    g_xfApplied[cls] = g_iniGen;
+    if (g_offPoseReq < 0) {
+        g_offPoseReq = FindProp(cls, "bRequestedPoseTransition");
+        g_offPoseT[0] = FindProp(cls, "RequestedPoseTransitionBlendTime");
+        g_offPoseT[1] = FindProp(cls, "RequestedPoseTransitionBlendTimeLowPriority");
+        g_offPoseT[2] = FindProp(cls, "RequestedPoseTransitionBlendTimeMin");
+        Log("pose transition request at +0x%X (times +0x%X +0x%X +0x%X)", g_offPoseReq, g_offPoseT[0], g_offPoseT[1], g_offPoseT[2]);
+    }
+    static int offBsm = -2; if (offBsm == -2) offBsm = FindProp(cc, "BakedStateMachines");
+    if (offBsm < 0) return;
+    const float s = g_enabled ? g_steer.locoBlend : 1.f, mn = g_steer.blendMin;
+    uintptr_t md = 0; int32_t mn_ = 0; Rd(cls + offBsm, md); Rd(cls + offBsm + 8, mn_);
+    unsigned n = 0;
+    for (int32_t m = 0; md && m < mn_ && m < 64; ++m) {
+        uintptr_t td = 0; int32_t tn = 0; Rd(md + 48 * m + 0x20, td); Rd(md + 48 * m + 0x28, tn);
+        for (int32_t t = 0; td && t < tn && t < 1024; ++t) {
+            uintptr_t addr = td + 64 * t + 0x10; float v = 0.f;
+            auto o = g_xfOrig.find(addr);
+            if (o == g_xfOrig.end()) { if (!Rd(addr, v) || !(v >= 0.f && v <= 3.f)) continue; o = g_xfOrig.emplace(addr, v).first; }
+            float base = o->second, nv = base * s, floor = base < mn ? base : mn;
+            if (s != 1.f && nv < floor) nv = floor;
+            if (WrFloat(addr, nv)) ++n;
+        }
+    }
+    Log("locomotion blends: %u transitions of %s set to x%.2f", n, ObjName(cls).c_str(), s);
+}
+
 static void HookAnimUpdate(void* self, float dt) {
     uintptr_t vt = *reinterpret_cast<uintptr_t*>(self);
+    ScalePoseRequest(static_cast<uint8_t*>(self));
     for (LONG i = 0; i < g_vhN; ++i) if (g_vh[i].vt == vt) { g_vh[i].orig(self, dt); break; }
+    ScalePoseRequest(static_cast<uint8_t*>(self));
     if (g_wallBlock && reinterpret_cast<uintptr_t>(self) == g_wallAi.load()) {
         uint8_t* a = static_cast<uint8_t*>(self); const float z[3] = {};
         a[0x3E0 + 0x01] = 0;                                              // bEnableMoveInput
@@ -879,7 +993,7 @@ static void UpdateSteerTargets() {
                 if (mesh && offAnim < 0) { uintptr_t mc = 0; Rd(mesh + OFF_UObject_Class, mc); offAnim = FindProp(mc, "AnimScriptInstance"); }
                 uintptr_t ai = 0; if (mesh && offAnim >= 0) Rd(mesh + offAnim, ai);
                 t.ai = ai;
-                if (ai) HookAnimVtable(ai);
+                if (ai) { HookAnimVtable(ai); ApplyLocoBlend(ai); }
             }
             uintptr_t x = 0, req = 0; uint32_t ty = 0;
             if (Rd(pawn + 0x638, x) && x && Rd(x + 0x1B8, req) && req && Rd(req + 0x90, ty) && ty < 64) t.actReq = req;
@@ -1023,6 +1137,31 @@ static void SteerTick(float dt, uint8_t& prevMode, double& landT, double now, un
     ++writes;
 }
 
+// landing cancel ([transitions] landing_cancel): a traversal (type 8) stays active through its landing with the feet
+// already on the ground (mode 1; request flags 0x100 / 0x2000 mark that tail) and every button press is ignored.
+// Polled on the ~250 Hz steering thread so the key-down is seen within a few ms, before the game's next frame reads it:
+// the traversal is ended then, and the game takes the press as usual (roll, or the next traversal at a ledge).
+static bool GameFocused();
+static void LandCancelPoll(double now) {
+    static bool keyWas = false; static double cancelT = -100; static unsigned nCancel = 0, nRolled = 0;
+    const SteerCfg& sc = g_steer;
+    bool key = GameFocused() && (GetAsyncKeyState(sc.rollKey) & 0x8000);
+    if (!key && g_xget) for (DWORD i = 0; i < 4 && !key; ++i) { XState s; if (g_xget(i, &s) == ERROR_SUCCESS && (s.buttons & 0x2000)) key = true; }
+    const SteerTargets& t = g_tg[g_tgFront.load()];
+    uint32_t act = 0; uint8_t mode = 0;
+    if (g_enabled && sc.landCancel && t.actReq && t.cmc && t.offMode >= 0 && Rd(t.actReq + 0x90, act) && Rd(t.cmc + t.offMode, mode)) {
+        if (act == 8 && mode == 1 && key && !keyWas) {
+            uint32_t fl = 0; Rd(t.actReq + 0x54, fl);
+            if (fl & 0x2100) {
+                const uint32_t zero = 0;
+                if (WrBytes(t.actReq + 0x90, &zero, 4)) { cancelT = now; if (++nCancel <= 20) Log("landing cancelled (flags %08X)", fl); }
+            }
+        }
+        if (cancelT > 0 && now - cancelT < 0.3 && act == 4) { cancelT = -100; if (++nRolled <= 20) Log("  -> rolled %u of %u", nRolled, nCancel); }
+    }
+    keyWas = key;
+}
+
 static DWORD WINAPI SteerThread(LPVOID) {
     HMODULE xi = LoadLibraryW(L"xinput1_4.dll");
     if (!xi) xi = LoadLibraryW(L"xinput9_1_0.dll");
@@ -1038,7 +1177,7 @@ static DWORD WINAPI SteerThread(LPVOID) {
         float dt = (float)(cur.QuadPart - prev.QuadPart) / (float)freq.QuadPart; prev = cur;
         if (dt > 0.05f) dt = 0.05f;
         double now = (double)cur.QuadPart / (double)freq.QuadPart;
-        __try { SteerTick(dt, prevMode, landT, now, writes); }
+        __try { SteerTick(dt, prevMode, landT, now, writes); LandCancelPoll(now); }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
         if (now - lastLog > 30.0) { if (writes != lastLogged) Log("steering: %u turn steps so far", writes); lastLogged = writes; lastLog = now; }
     }
@@ -1236,6 +1375,7 @@ struct DiagEntry { double t; int32_t actor, comp; float nz, vel, moved; uint8_t 
 static DiagEntry g_diag[64]; static std::atomic<unsigned> g_diagW{0}; static unsigned g_diagR = 0;
 static double g_diagLast = -100; static float g_ffPrev[3] = {}; static bool g_ffHavePrev = false;
 static volatile uint8_t g_blockParkour = 0;
+static volatile uint8_t g_rollEarly = 0;      // first roll_vault_start seconds of a roll: traversal still allowed
 static volatile uint8_t g_carryOn = 0;       // edge carry in progress: the roll's own position writes are skipped
 static std::atomic<unsigned> g_carrySkips{0};
 static volatile uint8_t g_coolingNow = 0;     // diagnostic: inside the cooldown window
@@ -1252,7 +1392,7 @@ static void GameTick() {
     float dt = (float)(now - m.last); if (dt > 0.05f) dt = 0.05f; m.last = now;
     const SteerTargets& t = g_tg[g_tgFront.load()];
     SteerCfg sc = g_steer;
-    if (!g_enabled) { g_blockParkour = 0; g_coolParkour = 0; return; }
+    if (!g_enabled) { g_blockParkour = 0; g_coolParkour = 0; g_rollEarly = 0; return; }
     if (!t.pc || !t.pawn || t.offRelLoc < 0 || t.offMode < 0 || t.offVel < 0 || !t.setLoc) return;
     uintptr_t pawn = 0; if (!Rd(t.pc + t.offPawn, pawn) || pawn != t.pawn) { m.haveLast = false; return; }
     uint8_t mode = 0; if (!Rd(t.cmc + t.offMode, mode)) return;
@@ -1292,7 +1432,10 @@ static void GameTick() {
     m.lastAct = act;
     bool cooling = sc.cooldown > 0.f && now - m.travEndT < sc.cooldown;
     // no traversal during the fast part of a roll (roll_block seconds from its start, or until the game ends it)
-    bool rollBlocking = dodging && !sc.rollVault && (m.keyWas ? now - m.rollT0Block < sc.rollBlock : true);
+    float rollAge = m.keyWas ? (float)(now - m.rollT0Block) : 0.f;
+    bool rollEarly = dodging && rollAge < sc.rollVaultStart;   // the very start of a roll may still turn into a traversal
+    bool rollBlocking = dodging && !sc.rollVault && !rollEarly && (m.keyWas ? rollAge < sc.rollBlock : true);
+    g_rollEarly = rollEarly ? 1 : 0;
     g_blockParkour = rollBlocking ? 1 : 0;
     g_coolingNow = cooling ? 1 : 0;
     g_coolParkour = (cooling && kCoolBlock) ? 1 : 0;
@@ -1693,7 +1836,7 @@ static bool HookParkourTry(void* self, void* pawn, void* req, void* dir, uint8_t
         const SteerTargets& t = g_tg[g_tgFront.load()];
         uint32_t act = 0;
         (void)pawn;
-        if (t.actReq && Rd(t.actReq + 0x90, act) && act == 4) {
+        if (t.actReq && Rd(t.actReq + 0x90, act) && act == 4 && !g_rollEarly) {
             static double lastCounted = -100;
             if (g_ms.rollT0 != lastCounted) { ++g_ms.travBlocks; lastCounted = g_ms.rollT0; }
             return false;                                   // a roll is playing: no traversal until it ends
@@ -1853,6 +1996,46 @@ static void InstallParkourTryHook(uintptr_t base) {
     if (!orig) { Log("parkour check differs - roll_vault setting off"); return; }
     g_tryOrig = reinterpret_cast<ParkourTryFn>(orig);
     Log("parkour check hooked (roll_vault)");
+}
+
+// ---------------------------------------------------------------- wider ledge search ([traversal] side_angle)
+// The ledge detection (0x13036A4) looks ahead of the character along its facing: arg 1 is the character's FTransform
+// (rotation quat at +0, translation +0x10, scale +0x20), xmm1 the forward reach. When it finds nothing straight ahead,
+// it is asked again with the facing turned side_angle degrees right, then left.
+typedef bool (*LedgeDetectFn)(const float*, float, void*, void*, void*, void*, void*);
+static LedgeDetectFn g_detOrig = nullptr;
+static constexpr uintptr_t RVA_LedgeDetect = 0x13036A4;
+static const uint8_t LD_PROLOGUE[17] = { 0x40, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x20, 0x07, 0x00, 0x00 };
+static std::atomic<unsigned> g_detCalls{0}, g_detSideHits{0};
+static std::atomic<long long> g_detTicks{0};
+
+static bool HookLedgeDetect(const float* xf, float reach, void* out, void* a4, void* a5, void* a6, void* a7) {
+    if (g_detOrig(xf, reach, out, a4, a5, a6, a7)) return true;
+    const float ang = g_steer.sideAngle;
+    if (!g_enabled || !(ang > 0.f) || !xf) return false;
+    LARGE_INTEGER t0, t1; QueryPerformanceCounter(&t0);
+    ++g_detCalls;
+    alignas(16) float r[12]; memcpy(r, xf, sizeof(r));
+    bool hit = false; float used = 0.f;
+    for (float a : { ang, -ang }) {
+        float h = a * 0.5f * 0.0174532925f, s = std::sin(h), c = std::cos(h);   // yaw about world Z: q' = (0,0,s,c) * q
+        const float x = xf[0], y = xf[1], z = xf[2], w = xf[3];
+        r[0] = c * x - s * y; r[1] = c * y + s * x; r[2] = c * z + s * w; r[3] = c * w - s * z;
+        if (g_detOrig(r, reach, out, a4, a5, a6, a7)) { hit = true; used = a; break; }
+    }
+    QueryPerformanceCounter(&t1); g_detTicks += t1.QuadPart - t0.QuadPart;
+    if (hit) {
+        unsigned n = ++g_detSideHits;
+        if (n <= 20) Log("ledge found %+.0f deg to the side", used);
+    }
+    return hit;
+}
+
+static void InstallLedgeDetectHook(uintptr_t base) {
+    void* orig = Detour(base + RVA_LedgeDetect, LD_PROLOGUE, sizeof(LD_PROLOGUE), reinterpret_cast<void*>(&HookLedgeDetect));
+    if (!orig) { Log("ledge search differs - side_angle setting off"); return; }
+    g_detOrig = reinterpret_cast<LedgeDetectFn>(orig);
+    Log("ledge search hooked (side_angle)");
 }
 
 // ---------------------------------------------------------------- diagnostics: who starts traversal moves?
@@ -2273,7 +2456,7 @@ static void ArmWatchpoint() {
 }
 
 static DWORD WINAPI MainThread(LPVOID) {
-    Log("A Bit Better Traversal Movement v1.1.0 running, base=%p", (void*)g_base);
+    Log("A Bit Better Traversal Movement v1.2.0 running, base=%p", (void*)g_base);
     for (int tries = 0; !FindAnimSequenceClass(); ++tries) {
         if (tries == 600) { Log("AnimSequence class or RateScale not found - the mod is off"); return 0; }
         Sleep(1000);
@@ -2386,7 +2569,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID) {
         if (!m || GetLastError() == ERROR_ALREADY_EXISTS) return TRUE;
         wchar_t path[MAX_PATH]; IniPath(path, L"TraversalSpeed.log");
         g_log = _wfopen(path, L"w");
-        Log("A Bit Better Traversal Movement v1.1.0 loaded");
+        Log("A Bit Better Traversal Movement v1.2.0 loaded");
         g_base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
         if (!IsSupportedBuild(g_base)) {
             Log("this game version is not supported (game update?) - the mod is off, the game runs unmodified");
@@ -2396,6 +2579,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID) {
         Log("main (game) thread %lu", GetCurrentThreadId());
         InstallProcessEventHook(g_base);   // before the game runs any game code
         InstallParkourTryHook(g_base);
+        InstallLedgeDetectHook(g_base);
         InstallParkourUpdateGate(g_base);
         InstallTeleportHook(g_base);
         InstallAutoTraversalGate(g_base);

@@ -8,7 +8,7 @@ Source code of **A Bit Better Traversal Movement**, a mod for FINAL FANTASY VII 
 - longer dodge rolls outside combat that can roll off small ledges (big drops and out-of-bounds edges still stop you);
 - rolls no longer turn into climbs mid-roll;
 - a short pause between big traversals so their animations don't cut each other off;
-- the Acrobacias prompt only shows when you're actually near the ledge;
+- the Acrobacias prompt only shows when you're actually near the ledge, and ledges a bit to the side count too;
 - no running in place against walls, and a hands-on-wall pose against tall walls.
 
 Every option lives in `TraversalSpeed.ini` and is re-read live while the game runs.

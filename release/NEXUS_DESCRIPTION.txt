@@ -7,6 +7,7 @@ Moving around the world in Rebirth can feel locked in and stiff: every ledge pla
 [list]
 [*][b]Faster traversal[/b] - vaults, climbs, jump-downs and cliff stops play faster (separately tunable), so you get control back sooner. The small automatic hop over steps keeps its normal speed so it never looks frozen.
 [*][b]Faster climbing sections (new in 1.1)[/b] - climbing walls, ladders, ropes, poles, zip lines, the grappling hook and narrow gaps play faster, with much shorter pauses between handholds.
+[*][b]Ledges to the side count (new in 1.2)[/b] - no need to face a ledge dead-on: with nothing straight ahead, ledges up to 35 degrees to either side also offer the prompt and the button traversal.
 [*][b]Snappier running (new in 1.1)[/b] - starting to run, stopping and turning around play faster, so the character reacts sooner to the stick. The running animation itself is unchanged.
 [*][b]Steer while falling[/b] - turn toward where you push the stick (or WASD) during drops and for a moment after landing, like normal walking.
 [*][b]Land where you fall[/b] - no more snapping onto the game's pre-planned landing spot. Where a jump has to reach a specific platform on another level, the game's placement is kept.
@@ -22,13 +23,21 @@ Moving around the world in Rebirth can feel locked in and stiff: every ledge pla
 [*][b]Everything live-tunable[/b] - one commented ini file, changes apply within a second while the game runs (the [i][camera][/i] options need a game restart).
 [/list]
 
+[size=4][b]What's new in 1.2[/b][/size]
+[list]
+[*]Ledges a bit to the side now count ([i]side_angle[/i], 35 degrees; 0 = straight ahead only).
+[*]A roll can still turn into a climb at its very start (button right next to a ledge), but not when it reaches a wall later ([i]roll_vault_start[/i]).
+[*]Wall stop no longer stops you at party members or other characters.
+[*]Optional shorter animation blends ([i][transitions][/i], off by default).
+[*][b]Updating:[/b] just replace dwmapi.dll; your ini keeps your values and gets the new keys on the first start.
+[/list]
+
 [size=4][b]What's new in 1.1[/b][/size]
 [list]
 [*]Climbing walls, ladders, ropes/poles/zip lines/grappling hook and narrow gaps play faster ([i]climb_wall, ladder, rope, squeeze[/i]).
 [*]Snappier run starts, stops and turns ([i]run_start, run_stop, turn[/i]).
 [*][i]custom=[/i] sets your own speed for any animation family.
 [*]Works for every party member.
-[*][b]Updating from 1.0:[/b] just replace dwmapi.dll. Your ini keeps your values and gets the new keys on the first start.
 [/list]
 
 [size=4][b]Installation[/b][/size]
@@ -58,6 +67,7 @@ This mod changes how the character moves in a game full of hand-placed jumps, le
 [*][b]Rolling off ledges[/b] - very rough or unusual edges may still stop a roll. Out-of-bounds protection relies on [i]max_drop[/i]: deeper drops always stop you at the edge.
 [*][b]Wall stop[/b] - may occasionally miss a wall, or stop you against odd geometry.
 [*][b]Hands on the wall[/b] - it reuses a door-push animation, so it can clip or look off on uneven walls ([i]wall_hand=0[/i] turns it off).
+[*][b]Ledges to the side[/b] - running along an edge, a ledge to the side can now start a jump-down. Lower [i]side_angle[/i] if it happens where you don't want it.
 [*][b]Faster run starts, stops and turns[/b] - if the feet look like they slide somewhere, lower [i]run_start[/i], [i]run_stop[/i] or [i]turn[/i].
 [*][b]Shorter prompt reach[/b] also means standing closer to a ledge for the button to start a climb or drop.
 [*]Other party members, story segments, chocobo and vehicle sections have seen less testing.
