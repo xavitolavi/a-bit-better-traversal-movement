@@ -7,6 +7,7 @@ Moving around the world in Rebirth can feel locked in and stiff: every ledge pla
 [list]
 [*][b]Faster traversal[/b] - vaults, climbs, jump-downs and cliff stops play faster (separately tunable), so you get control back sooner. The small automatic hop over steps keeps its normal speed so it never looks frozen.
 [*][b]Faster climbing sections (new in 1.1)[/b] - climbing walls, ladders, ropes, poles, zip lines, the grappling hook and narrow gaps play faster, with much shorter pauses between handholds.
+[*][b]Control back at the end of a traversal (new in 1.3)[/b] - no more waiting for every landing or vault animation to finish: press dodge / Acrobacias while landing to roll or start the next traversal right away, and end a vault or climb with the stick or the button once your feet are on the floor.
 [*][b]Ledges to the side count (new in 1.2)[/b] - no need to face a ledge dead-on: with nothing straight ahead, ledges up to 35 degrees to either side also offer the prompt and the button traversal.
 [*][b]Snappier running (new in 1.1)[/b] - starting to run, stopping and turning around play faster, so the character reacts sooner to the stick. The running animation itself is unchanged.
 [*][b]Steer while falling[/b] - turn toward where you push the stick (or WASD) during drops and for a moment after landing, like normal walking.
@@ -23,13 +24,22 @@ Moving around the world in Rebirth can feel locked in and stiff: every ledge pla
 [*][b]Everything live-tunable[/b] - one commented ini file, changes apply within a second while the game runs (the [i][camera][/i] options need a game restart).
 [/list]
 
+[size=4][b]What's new in 1.3[/b][/size]
+[list]
+[*]Control comes back at the end of a traversal: roll or start the next traversal right away while landing, and end vaults and climbs with the stick or button once your feet are down ([i]landing_cancel[/i]).
+[*]The short pause after a traversal no longer blocks the button - only automatic traversals wait.
+[*]No accidental drops when running along an edge: ledges found to the side only offer the prompt.
+[*]Pushing diagonally into a wall slides along it.
+[*]Rolls from standing still go as far as running ones, and rolls keep their reach up slopes.
+[*][b]Updating:[/b] just replace dwmapi.dll; your ini keeps your values and gets the new keys on the first start.
+[/list]
+
 [size=4][b]What's new in 1.2[/b][/size]
 [list]
 [*]Ledges a bit to the side now count ([i]side_angle[/i], 35 degrees; 0 = straight ahead only).
 [*]A roll can still turn into a climb at its very start (button right next to a ledge), but not when it reaches a wall later ([i]roll_vault_start[/i]).
 [*]Wall stop no longer stops you at party members or other characters.
 [*]Optional shorter animation blends ([i][transitions][/i], off by default).
-[*][b]Updating:[/b] just replace dwmapi.dll; your ini keeps your values and gets the new keys on the first start.
 [/list]
 
 [size=4][b]What's new in 1.1[/b][/size]
@@ -67,7 +77,7 @@ This mod changes how the character moves in a game full of hand-placed jumps, le
 [*][b]Rolling off ledges[/b] - very rough or unusual edges may still stop a roll. Out-of-bounds protection relies on [i]max_drop[/i]: deeper drops always stop you at the edge.
 [*][b]Wall stop[/b] - may occasionally miss a wall, or stop you against odd geometry.
 [*][b]Hands on the wall[/b] - it reuses a door-push animation, so it can clip or look off on uneven walls ([i]wall_hand=0[/i] turns it off).
-[*][b]Ledges to the side[/b] - running along an edge, a ledge to the side can now start a jump-down. Lower [i]side_angle[/i] if it happens where you don't want it.
+[*][b]Ending traversals early[/b] - it ends them the game's own way and only on the ground, but if a scripted jump or platforming section misbehaves, set [i]landing_cancel=0[/i] and tell me where.
 [*][b]Faster run starts, stops and turns[/b] - if the feet look like they slide somewhere, lower [i]run_start[/i], [i]run_stop[/i] or [i]turn[/i].
 [*][b]Shorter prompt reach[/b] also means standing closer to a ledge for the button to start a climb or drop.
 [*]Other party members, story segments, chocobo and vehicle sections have seen less testing.

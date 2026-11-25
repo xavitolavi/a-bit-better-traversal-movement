@@ -1,10 +1,22 @@
-A Bit Better Traversal Movement  v1.2.0
+A Bit Better Traversal Movement  v1.3.0
 Final Fantasy VII Rebirth (PC, game version 1.0.0.5)
 
 Makes moving around the field feel less locked and stiff: faster traversal animations (vaults, drops, climbing walls,
 ladders, ropes, narrow gaps), snappier run starts, stops and turns, steering while falling,
 longer dodge rolls that can carry you off small ledges, landing where you actually fall, no running in place
 against walls, a camera that follows you down when you drop off a ledge, and more. Every setting is in TraversalSpeed.ini and applies live while you play.
+
+WHAT'S NEW IN 1.3
+- Control comes back at the end of a traversal instead of after its whole animation ([transitions] landing_cancel):
+  pressing dodge / Acrobacias while landing from a drop rolls or starts the next traversal right away, and at the end
+  of a vault or climb (feet already on the floor) the button or the stick ends it at once.
+- The short pause after a traversal only holds back automatic traversals; the button always answers right away.
+- Ledges found to the side never start an automatic vault or drop (no accidental drops running along an edge);
+  they still offer the prompt.
+- Pushing diagonally into a wall slides along it instead of stopping.
+- Rolls from standing still go as far as running ones ([roll] distance_standing), and rolls keep their reach up
+  slopes ([roll] max_rise).
+Updating: just replace dwmapi.dll. Your TraversalSpeed.ini keeps your values and gets the new keys on the first start.
 
 WHAT'S NEW IN 1.2
 - Ledges a bit to the side now count: when there's no ledge straight ahead, the mod also looks up to 35 degrees to
@@ -13,9 +25,6 @@ WHAT'S NEW IN 1.2
   not when it reaches a wall later ([traversal] roll_vault_start=0.15).
 - Wall stop no longer stops you at party members or other characters (it missed some in busy areas).
 - Optional [transitions] settings to shorten animation blends (off by default: 1 = the game's own blends).
-Updating from 1.0 or 1.1: just replace dwmapi.dll. Your TraversalSpeed.ini keeps your values and gets the new keys on
-the first start.
-
 WHAT'S NEW IN 1.1
 - Climbing walls, ladders, ropes/poles/zip lines/grappling hook and narrow gaps play faster ([speed] climb_wall,
   ladder, rope, squeeze). The pauses between handholds on climbing walls are much shorter.
@@ -54,8 +63,9 @@ KNOWN LIMITS / WHERE IT MIGHT GO WRONG
 - Hands-on-wall pose: it reuses a door-push animation, so it can clip or look off on uneven walls (wall_hand=0 turns it off).
 - Faster run starts/stops/turns: if the feet look like they slide on some surface, lower run_start, run_stop or turn
   (1 = the game's normal speed).
-- side_angle: running along an edge, a ledge to the side can now start a jump-down. Lower side_angle (or 0) if that
-  happens where you don't want it.
+- landing_cancel: it ends traversals the way the game itself does, but always on the ground; if a scripted jump or
+  platforming section misbehaves, set landing_cancel=0 and please tell me where.
+- side_angle: ledges to the side only offer the prompt (since 1.3 they never start an automatic traversal).
 - prompt_reach below 1 also means you have to be closer to a ledge for the button to start a climb or drop.
 - Mostly tested with Cloud in the open world. Other party members, story segments, chocobo and vehicle sections are
   less tested.

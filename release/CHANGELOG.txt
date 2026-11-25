@@ -1,5 +1,17 @@
 A Bit Better Traversal Movement - changelog
 
+1.3.0 (2026-11-25)
+- Traversal cancel ([transitions] landing_cancel=1): the end of a traversal is ended the game's own way (request code
+  in-progress bits cleared, end state 7, traversal bit cleared, "everything allowed" marks set), so control comes back
+  instead of waiting for the animation: the dodge / Acrobacias button during a landing rolls or starts the next
+  traversal at once; at the end of a vault or climb with the feet on the floor, the button or the stick ends it and
+  puts the character back into walking. landing_cancel_move (default 0) also lets the stick end landings.
+- The traversal cooldown only holds back automatic traversals; the button is never blocked.
+- Ledges found only by the side search (side_angle) never start an automatic vault or drop.
+- Wall stop: a push counts as head-on only within ~37 degrees (was ~45), so diagonal pushes slide along walls.
+- Rolls: distance_standing=1.6 for rolls from standing still; the stretch follows uphill slopes and only stops after a
+  60 cm rise (max_rise; was a fixed 20 cm).
+
 1.2.0 (2026-11-25)
 - Wider ledge search: with no ledge straight ahead, the game's own ledge search is asked again with the facing turned
   side_angle degrees (default 35) to each side. 0 = vanilla.

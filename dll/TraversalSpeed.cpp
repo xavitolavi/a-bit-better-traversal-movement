@@ -201,6 +201,10 @@ struct SteerCfg {
     float sideAngle = 0.f;                                  // [traversal] side_angle
     float rollVaultStart = 0.f;                             // [traversal] roll_vault_start
     bool landCancel = false;                                // [transitions] landing_cancel
+    float landCancelMove = 0.15f;                           // [transitions] landing_cancel_move
+    uint32_t landCancelFlags = 0x21EF;                      // [transitions] landing_cancel_flags (hex, hidden)
+    float hopHeight = 0.f, hopTime = 0.45f;                 // [roll] hop_height (cm), hop_time (s)
+    float rollDistStand = 1.6f, rollMaxRise = 60.f;         // [roll] distance_standing, max_rise (cm)
 };
 static SteerCfg g_steer;
 struct HandAnim { uintptr_t seq; char pc[8]; bool right; };          // wall-hand animation per character folder (PC0000, PC0009, ...)
@@ -281,6 +285,10 @@ static const char* RELEASE_INI =
     "; a roll only goes off an edge when there's walkable ground within this many cm below; bigger drops (big cliffs,\r\n"
     "; out-of-bounds edges) stop the roll at the edge like the normal game\r\n"
     "max_drop=450\r\n"
+    "; distance (like the setting above) for a roll started from standing still, where the game's own roll is shorter\r\n"
+    "distance_standing=1.6\r\n"
+    "; rolling uphill keeps its stretch until it has climbed this many cm (higher = it went up onto something)\r\n"
+    "max_rise=60\r\n"
     "\r\n"
     "[momentum]\r\n"
     "; keep moving after landing from a drop instead of stopping on the spot: share of the air speed kept (0 = off)\r\n"
@@ -300,7 +308,8 @@ static const char* RELEASE_INI =
     "; ...except right at the start: a roll can still turn into a climb or jump-down during its first this-many seconds\r\n"
     ";    (pressing the button close to a ledge), but not when it reaches a wall later (0 = blocked from the start)\r\n"
     "roll_vault_start=0.15\r\n"
-    "; short pause (seconds) before another traversal can start, so back-to-back ledges don't cut each other's animations\r\n"
+    "; short pause (seconds) before another AUTOMATIC traversal can start, so back-to-back ledges don't cut each other's\r\n"
+    "; animations. The button (Acrobacias prompt, roll) is never held back by it.\r\n"
     "cooldown=0.13\r\n"
     "; only a traversal that changes height by at least this many cm starts that pause (small step-downs chain freely)\r\n"
     "cooldown_min_height=150\r\n"
@@ -336,6 +345,13 @@ static const char* RELEASE_INI =
     "fall_follow_speed=40\r\n"
     "\r\n"
     "[transitions]\r\n"
+    "; 1 = get control back at the end of a traversal instead of waiting for its animation to finish:\r\n"
+    ";     while landing from a drop (feet on the ground), the dodge / Acrobacias button rolls or starts the next traversal\r\n"
+    ";     right away; at the end of a vault or climb (feet on the floor), the button or pushing the stick ends it at once\r\n"
+    "landing_cancel=1\r\n"
+    "; landings after a drop: also let the stick end them, this many seconds in (0 = only the button ends a landing,\r\n"
+    "; so the landing animation still plays while you run on)\r\n"
+    "landing_cancel_move=0\r\n"
     "; how long the game blends from one animation into the next, as a share of its own blend time (1 = normal,\r\n"
     "; smaller = snappier). blend: in and out of actions (vaults, drops, landings, climbs, rolls) and running\r\n"
     "blend=1\r\n"
@@ -514,7 +530,21 @@ static bool LoadIni() {
     if (!GetPrivateProfileStringW(L"traversal", L"roll_vault_start", L"", v, 32, path)) WritePrivateProfileStringW(L"traversal", L"roll_vault_start", L"0.15", path);
     GetPrivateProfileStringW(L"traversal", L"roll_vault_start", L"0", v, 32, path); sc.rollVaultStart = (float)_wtof(v);
     if (!(sc.rollVaultStart >= 0.f && sc.rollVaultStart <= 2.f)) sc.rollVaultStart = 0.f;
-    sc.landCancel = GetPrivateProfileIntW(L"transitions", L"landing_cancel", 0, path) != 0;
+    if (!GetPrivateProfileStringW(L"transitions", L"landing_cancel", L"", v, 32, path)) { WritePrivateProfileStringW(L"transitions", L"landing_cancel", L"1", path); WritePrivateProfileStringW(L"transitions", L"landing_cancel_move", L"0", path); }
+    sc.landCancel = GetPrivateProfileIntW(L"transitions", L"landing_cancel", 1, path) != 0;
+    GetPrivateProfileStringW(L"transitions", L"landing_cancel_move", L"0", v, 32, path); sc.landCancelMove = (float)_wtof(v);
+    if (!(sc.landCancelMove >= 0.f && sc.landCancelMove <= 2.f)) sc.landCancelMove = 0.f;
+    GetPrivateProfileStringW(L"transitions", L"landing_cancel_flags", L"21EF", v, 32, path); sc.landCancelFlags = (uint32_t)wcstoul(v, nullptr, 16);
+    // hop_height / hop_time: hidden, off (the foot IK keeps the visible body on the ground, so the arc does not show)
+    GetPrivateProfileStringW(L"roll", L"hop_height", L"0", v, 32, path); sc.hopHeight = (float)_wtof(v);
+    GetPrivateProfileStringW(L"roll", L"hop_time", L"0.45", v, 32, path); sc.hopTime = (float)_wtof(v);
+    if (!(sc.hopHeight >= 0.f && sc.hopHeight <= 100.f)) sc.hopHeight = 0.f;
+    if (!(sc.hopTime >= 0.1f && sc.hopTime <= 1.5f)) sc.hopTime = 0.45f;
+    if (!GetPrivateProfileStringW(L"roll", L"distance_standing", L"", v, 32, path)) { WritePrivateProfileStringW(L"roll", L"distance_standing", L"1.6", path); WritePrivateProfileStringW(L"roll", L"max_rise", L"60", path); }
+    GetPrivateProfileStringW(L"roll", L"distance_standing", L"1.6", v, 32, path); sc.rollDistStand = (float)_wtof(v);
+    GetPrivateProfileStringW(L"roll", L"max_rise", L"60", v, 32, path); sc.rollMaxRise = (float)_wtof(v);
+    if (!(sc.rollDistStand >= 0.5f && sc.rollDistStand <= 3.f)) sc.rollDistStand = sc.rollDist;
+    if (!(sc.rollMaxRise >= 0.f && sc.rollMaxRise <= 300.f)) sc.rollMaxRise = 60.f;
     g_steer = sc;
     ++g_iniGen;
     Log("settings: enabled=%d up=%.2f down=%.2f land=%.2f cliff_stop=%.2f | steer=%d air=%d landing=%d window=%.2fs rate=%.0f keys=%.4s"
@@ -623,6 +653,7 @@ static std::atomic<uintptr_t> g_playSlotFn{0}, g_stopSlotFn{0};   // UAnimInstan
 static std::atomic<uintptr_t> g_traceFn{0}, g_kslCdo{0};   // UKismetSystemLibrary::LineTraceSingle and the library default object
 static std::atomic<uintptr_t> g_floorFn{0};       // UFunction UCharacterMovementComponent::K2_ComputeFloorDist
 static std::atomic<uintptr_t> g_setLocFn{0};      // UFunction AActor::K2_SetActorLocation (found by the object walk)
+static std::atomic<uintptr_t> g_setRelFn{0};      // UFunction USceneComponent::K2_SetRelativeLocation (roll hop)
 static uintptr_t g_resParamObj = 0;                // /Game/DataObject/Resident/ResidentParameter (global tunables)
 
 static void Pass() {
@@ -688,6 +719,13 @@ static void Pass() {
             if (Rd(obj + OFF_UObject_Name, ni) && NameStr(ni) == "K2_ComputeFloorDist" && ObjName(cls) == "Function") {
                 uintptr_t outer = 0; Rd(obj + OFF_UObject_Outer, outer);
                 if (outer && ObjName(outer) == "CharacterMovementComponent") g_floorFn.store(obj);
+            }
+        }
+        if (!g_setRelFn.load()) {
+            uint32_t ni = 0;
+            if (Rd(obj + OFF_UObject_Name, ni) && NameStr(ni) == "K2_SetRelativeLocation" && ObjName(cls) == "Function") {
+                uintptr_t outer = 0; Rd(obj + OFF_UObject_Outer, outer);
+                if (outer && ObjName(outer) == "SceneComponent") g_setRelFn.store(obj);
             }
         }
         if (!g_setLocFn.load()) {
@@ -826,11 +864,13 @@ struct SteerTargets {
     uintptr_t traceFn = 0, kslCdo = 0; int lWorld = -1, lStart = -1, lEnd = -1, lChan = -1, lComplex = -1, lIgnoreSelf = -1, lParms = 0,
         lHit = -1, lImpact = -1, lNormal = -1, lRet = -1; uint8_t mLHit = 0;   // LineTraceSingle parameters (OutHit fields)
     uintptr_t ai = 0;       // the character's anim instance (mesh AnimScriptInstance)
+    uintptr_t mesh = 0;     // the character's skeletal mesh component (roll hop arc)
     uintptr_t actReq = 0;   // the character's action request: [[pawn+0x638]+0x1B8]; +0x90 = action type (4 dodge, 8 parkour)
 };
 static SteerTargets g_tg[2];
 static std::atomic<int> g_tgFront{0};
 static int g_offPawn = -1, g_offCamMgr = -1, g_offCamYaw = -1, g_offRoot = -1, g_offCmc = -1, g_offRelRot = -1, g_offVel = -1, g_offMode = -1, g_offRelLoc = -1;
+static int g_relNew = -1, g_relTeleport = -1, g_relParms = 0;   // K2_SetRelativeLocation parameters
 static int g_pNewLoc = -1, g_pSweep = -1, g_pTeleport = -1, g_parmsSize = 0, g_pBlock = -1, g_pPenetr = -1, g_pNormZ = -1;
 static int g_pHitActor = -1, g_pHitComp = -1;
 static uint8_t g_mBlock = 0, g_mPenetr = 0;
@@ -992,13 +1032,23 @@ static void UpdateSteerTargets() {
                 uintptr_t mesh = 0; if (offMesh >= 0) Rd(pawn + offMesh, mesh);
                 if (mesh && offAnim < 0) { uintptr_t mc = 0; Rd(mesh + OFF_UObject_Class, mc); offAnim = FindProp(mc, "AnimScriptInstance"); }
                 uintptr_t ai = 0; if (mesh && offAnim >= 0) Rd(mesh + offAnim, ai);
-                t.ai = ai;
+                t.ai = ai; t.mesh = mesh;
                 if (ai) { HookAnimVtable(ai); ApplyLocoBlend(ai); }
             }
             uintptr_t x = 0, req = 0; uint32_t ty = 0;
             if (Rd(pawn + 0x638, x) && x && Rd(x + 0x1B8, req) && req && Rd(req + 0x90, ty) && ty < 64) t.actReq = req;
         }
         t.pc = pc;
+    }
+    {   // K2_SetRelativeLocation(NewRelativeLocation, bSweep, SweepHitResult&, bTeleport)
+        uintptr_t rf = g_setRelFn.load();
+        if (rf && g_relParms <= 0) {
+            g_relNew = FindProp(rf, "NewLocation"); if (g_relNew < 0) g_relNew = FindProp(rf, "NewRelativeLocation");
+            g_relTeleport = FindProp(rf, "bTeleport");
+            int32_t sz = 0; Rd(rf + 0x58, sz);
+            if (g_relNew >= 0 && sz > 0 && sz <= 512) { g_relParms = sz; Log("roll hop: K2_SetRelativeLocation params %d bytes", sz); }
+            else { static bool once = false; if (!once) { once = true; Log("roll hop: K2_SetRelativeLocation layout not found (new %d size %d)", g_relNew, sz); } }
+        }
     }
     uintptr_t fn = g_setLocFn.load();
     if (fn && g_pNewLoc < 0) {
@@ -1143,21 +1193,37 @@ static void SteerTick(float dt, uint8_t& prevMode, double& landT, double now, un
 // the traversal is ended then, and the game takes the press as usual (roll, or the next traversal at a ledge).
 static bool GameFocused();
 static void LandCancelPoll(double now) {
-    static bool keyWas = false; static double cancelT = -100; static unsigned nCancel = 0, nRolled = 0;
+    static bool keyWas = false; static double cancelT = -100, tailT = -100; static unsigned nCancel = 0, nRolled = 0, nMove = 0;
     const SteerCfg& sc = g_steer;
     bool key = GameFocused() && (GetAsyncKeyState(sc.rollKey) & 0x8000);
     if (!key && g_xget) for (DWORD i = 0; i < 4 && !key; ++i) { XState s; if (g_xget(i, &s) == ERROR_SUCCESS && (s.buttons & 0x2000)) key = true; }
     const SteerTargets& t = g_tg[g_tgFront.load()];
     uint32_t act = 0; uint8_t mode = 0;
     if (g_enabled && sc.landCancel && t.actReq && t.cmc && t.offMode >= 0 && Rd(t.actReq + 0x90, act) && Rd(t.cmc + t.offMode, mode)) {
-        if (act == 8 && mode == 1 && key && !keyWas) {
-            uint32_t fl = 0; Rd(t.actReq + 0x54, fl);
-            if (fl & 0x2100) {
-                const uint32_t zero = 0;
-                if (WrBytes(t.actReq + 0x90, &zero, 4)) { cancelT = now; if (++nCancel <= 20) Log("landing cancelled (flags %08X)", fl); }
+        uint32_t fl = 0; Rd(t.actReq + 0x54, fl);
+        uint32_t code0 = 0; Rd(t.actReq + 0x8C, code0);
+        // feet on the ground and the traversal in its landing phase (request code ..0A01) or marked as ending (0x2000);
+        // never the start of a jump-down (..2201 / ..2601 / ..0601, still on the edge or just touching down)
+        bool tail = (act & 8) && mode == 1 && ((code0 & 0xFFFF) == 0x0A01 || (fl & 0x2000));
+        if (!tail) tailT = -100; else if (tailT < 0) tailT = now;
+        bool byKey = tail && key && !keyWas;                                       // dodge / Acrobacias: right away
+        float r, f; bool stick = ReadInput(sc, r, f);
+        bool byMove = tail && !byKey && sc.landCancelMove > 0.f && stick && now - tailT >= sc.landCancelMove;   // moving on
+        if (byKey || byMove) {
+            // the game's own end of a traversal (0x15BBF0D): clear the in-progress bits of the request code,
+            // end state 7, clear the traversal bit of the action mask
+            uint32_t code = 0; Rd(t.actReq + 0x8C, code);
+            const uint32_t newCode = code & 0xFFF1FFFFu, newAct = act & ~8u; const uint8_t endState = 7;
+            // first the 'everything allowed' marks the game sets when it ends one itself (0x15BB8E0: 0x15B921C(req,0,0,0x21EF))
+            if (sc.landCancelFlags) { uint32_t nf = fl | sc.landCancelFlags; WrBytes(t.actReq + 0x54, &nf, 4); }
+            if (WrBytes(t.actReq + 0x8C, &newCode, 4) && WrBytes(t.actReq + 0x338, &endState, 1) && WrBytes(t.actReq + 0x90, &newAct, 4)) {
+                cancelT = byKey ? now : -100; tailT = -100;
+                if (byMove) ++nMove;
+                if (++nCancel <= 30) Log("landing cancelled by %s %.2f s into it (code %08X flags %08X, set %08X)", byKey ? "button" : "stick",
+                                         byKey ? 0.f : sc.landCancelMove, code, fl, sc.landCancelFlags);
             }
         }
-        if (cancelT > 0 && now - cancelT < 0.3 && act == 4) { cancelT = -100; if (++nRolled <= 20) Log("  -> rolled %u of %u", nRolled, nCancel); }
+        if (cancelT > 0 && now - cancelT < 0.3 && (act & 4)) { cancelT = -100; if (++nRolled <= 30) Log("  -> rolled %u of %u button cancels", nRolled, nCancel - nMove); }
     }
     keyWas = key;
 }
@@ -1367,6 +1433,7 @@ struct MoveState {
     uint32_t lastAct = 0; double travEndT = -100, rollT0Block = -100; unsigned cooldowns = 0, smallTrav = 0; float travZ0 = 0;
     bool ffOn = false, snapGuard = false, haveExpect = false; float ffV[2] = {}, expect[3] = {}; double snapT0 = -100;
     float winSpeed = 0.f, winPos[2] = {}; double winT = -1.0;
+    double hopT0 = -100; bool hopOn = false; float hopBaseZ = 0.f; bool standingRoll = false;
     unsigned ffRestores = 0, snapUndos = 0, cliffStops = 0, edgeCarries = 0; bool steppedOff = false, offActive = false; float offPushed = 0.f; bool stretchedThisRoll = false;
 };
 static MoveState g_ms;
@@ -1380,6 +1447,7 @@ static volatile uint8_t g_carryOn = 0;       // edge carry in progress: the roll
 static std::atomic<unsigned> g_carrySkips{0};
 static volatile uint8_t g_coolingNow = 0;     // diagnostic: inside the cooldown window
 static const bool kCoolBlock = true;
+static volatile uint8_t g_sideOnly = 0;       // the ledge in front was only found by the side search (side_angle)
 static volatile uint8_t g_coolParkour = 0;    // cooldown after a traversal: no new one starts (the parkour update still runs)   // read by the parkour-update gate stub: 1 = skip traversal this frame
 
 static bool GameFocused() { DWORD pid = 0; GetWindowThreadProcessId(GetForegroundWindow(), &pid); return pid == GetCurrentProcessId(); }
@@ -1408,6 +1476,55 @@ static void GameTick() {
     // dodge roll: key pressed while walking/standing -> stretch the game's own movement for rollTime seconds
     // a roll = the game's own action request says "dodge" (type 4); works for keyboard and controller alike
     uint32_t act = 0; bool dodging = t.actReq && Rd(t.actReq + 0x90, act) && act == 4;
+    // end of vaults and climb-ups ([transitions] landing_cancel): these run in the scripted 'flying' mode (5) until their
+    // last frame. In their marked ending (request flags 0x2000) with walkable floor right under the feet, the button or the
+    // stick ends them the game's way and puts the character back into walking (SetMovementMode, vtable +0x5F8).
+    {
+        static bool keyWas = false; static double tailT = -100; static unsigned nUp = 0;
+        bool key = GameFocused() && (GetAsyncKeyState(sc.rollKey) & 0x8000);
+        if (!key && g_xget) for (DWORD i = 0; i < 4 && !key; ++i) { XState s; if (g_xget(i, &s) == ERROR_SUCCESS && (s.buttons & 0x2000)) key = true; }
+        uint32_t fl = 0; if (t.actReq) Rd(t.actReq + 0x54, fl);
+        bool tail = sc.landCancel && t.actReq && (act & 8) && mode == 5 && (fl & 0x2000);
+        if (!tail) tailT = -100; else if (tailT < 0) tailT = now;
+        float r, f; bool stick = ReadInput(sc, r, f);
+        if (tail && ((key && !keyWas) || (stick && now - tailT >= sc.landCancelMove))) {
+            FloorProbe fp = ProbeFloor(t, pos, 40.f);
+            if (fp.ok && fp.hit && fp.walkable && fp.dist < 12.f) {
+                uint32_t code = 0; Rd(t.actReq + 0x8C, code);
+                uint32_t nf = fl | sc.landCancelFlags, newCode = code & 0xFFF1FFFFu, newAct = act & ~8u; const uint8_t endState = 7;
+                uintptr_t vt = 0, fn = 0;
+                if (Rd(t.cmc, vt) && vt && Rd(vt + 0x5F8, fn) && fn >= g_base && fn < g_base + 0x10000000 &&
+                    WrBytes(t.actReq + 0x54, &nf, 4) && WrBytes(t.actReq + 0x8C, &newCode, 4) && WrBytes(t.actReq + 0x338, &endState, 1) &&
+                    WrBytes(t.actReq + 0x90, &newAct, 4)) {
+                    reinterpret_cast<void (*)(void*, uint8_t, uint8_t)>(fn)(reinterpret_cast<void*>(t.cmc), 1, 0);   // walking
+                    act = newAct; mode = 1; tailT = -100;
+                    if (++nUp <= 30) Log("vault/climb ending cancelled by %s (code %08X, floor %.0f cm)", key && !keyWas ? "button" : "stick", code, fp.dist);
+                }
+            }
+        }
+        keyWas = key;
+    }
+    // roll hop ([roll] hop_height): the visible body follows a small arc during the roll; the collision capsule stays on the
+    // ground, so nothing can get stuck. The mesh is moved with K2_SetRelativeLocation (its transform updates at once) and
+    // put back at its own height when the roll ends.
+    if (t.mesh && g_relParms > 0 && g_relNew >= 0) {
+        auto setZ = [&](float z) {
+            uint8_t parms[512] = {};
+            float loc[3] = {}; if (!RdBytes(t.mesh + 0x11C, loc, 12)) return;
+            loc[2] = z; memcpy(parms + g_relNew, loc, 12);
+            if (g_relTeleport >= 0) parms[g_relTeleport] = 1;
+            g_peOrig(reinterpret_cast<void*>(t.mesh), reinterpret_cast<void*>(g_setRelFn.load()), parms);
+        };
+        float age = (float)(now - m.hopT0);
+        bool want = sc.hopHeight > 0.f && dodging && mode == 1 && age >= 0.f && age < sc.hopTime;
+        if (want) {
+            if (!m.hopOn) { if (!Rd(t.mesh + 0x11C + 8, m.hopBaseZ)) want = false; else m.hopOn = true; }
+            if (m.hopOn) {
+                setZ(m.hopBaseZ + sc.hopHeight * std::sin(3.14159265f * age / sc.hopTime));
+            }
+        }
+        if (!want && m.hopOn) { setZ(m.hopBaseZ); m.hopOn = false; }
+    }
     // free fall, part 2: after a jump-down touches down the game slides the character onto its chosen landing spot
     // while the traversal (type 8) is still running. Undo any movement the game adds on its own in that phase.
     if (false && sc.freeFall) {   // off: it fought the game's own landing pin (frame-by-frame flicker); see TeleportHook
@@ -1440,7 +1557,8 @@ static void GameTick() {
     g_coolingNow = cooling ? 1 : 0;
     g_coolParkour = (cooling && kCoolBlock) ? 1 : 0;
     if (dodging && !m.keyWas && mode == 1) {
-        m.rollT0 = m.blockRollT0 = m.rollT0Block = now; m.rollZ0 = pos[2]; memcpy(m.lastPos, pos, 12); m.haveLast = true;
+        m.rollT0 = m.blockRollT0 = m.rollT0Block = m.hopT0 = now; m.rollZ0 = pos[2]; memcpy(m.lastPos, pos, 12); m.haveLast = true;
+        m.standingRoll = m.winSpeed < 120.f;   // rolled from (almost) standing still: the game's own roll is shorter then
         m.dirSet = m.edgeStop = m.pushedThisRoll = m.stretchedThisRoll = m.steppedOff = m.offActive = false; m.offPushed = 0.f; m.peak = 0;
         if (!sc.rollVault) ++m.travBlocks;
     }
@@ -1498,7 +1616,7 @@ static void GameTick() {
                 float face = h.n[0] * dx + h.n[1] * dy;                      // -1 = wall straight ahead
                 float dist = std::sqrt((h.p[0] - pos[0]) * (h.p[0] - pos[0]) + (h.p[1] - pos[1]) * (h.p[1] - pos[1])) - rad;
                 if (face < -0.1f && (sp < 80.f || sameWay)) want = true;                          // pressed against it
-                else if (face < -0.7f && facing && dist < 10.f + sp * 0.12f) want = true;         // about to run into it head-on
+                else if (face < -0.8f && facing && dist < 10.f + sp * 0.12f) want = true;         // about to run into it head-on
             }
             if (want) ++nWall;
             else if (!charAhead && (sp < 30.f || sameWay) && facing) { stuckFor += dt; if (stuckFor > 0.18f) { want = true; ++nSlow; } }   // blocked by something the trace doesn't see
@@ -1597,11 +1715,13 @@ static void GameTick() {
         }
     }
     if (!dodging && now - m.rollT0 > 0.1) m.rollT0 = -100;   // the game ended the roll: stop stretching
-    if (now - m.rollT0 < sc.rollTime && pos[2] - m.rollZ0 > 20.f) m.rollT0 = -100;   // going up something: stop stretching
-    if (now - m.rollT0 < sc.rollTime && mode == 1 && sc.rollDist != 1.f && m.haveLast) {
+    if (now - m.rollT0 < sc.rollTime && pos[2] - m.rollZ0 > sc.rollMaxRise) m.rollT0 = -100;   // climbed onto something: stop stretching (slopes keep going)
+    const float rollMul = m.standingRoll ? sc.rollDistStand : sc.rollDist;
+    if (now - m.rollT0 < sc.rollTime && mode == 1 && rollMul != 1.f && m.haveLast) {
         float dx = pos[0] - m.lastPos[0], dy = pos[1] - m.lastPos[1], d = std::sqrt(dx * dx + dy * dy);
         if (d > 0.5f && d < 80.f) {
-            float k = sc.rollDist - 1.f, to[3] = { pos[0] + dx * k, pos[1] + dy * k, pos[2] };
+            float k = rollMul - 1.f, up = pos[2] - m.lastPos[2] > 0.f ? (pos[2] - m.lastPos[2]) * k : 0.f;   // uphill: follow the slope
+            float to[3] = { pos[0] + dx * k, pos[1] + dy * k, pos[2] + up };
             SweepResult r = SW_FAIL;
             if (!DropOk(t, to, dx / d, dy / d, CapsuleRadius(t) + 30.f, sc.maxDrop)) { ++m.cliffStops; m.rollT0 = -100; }
             HitInfo hi;
@@ -1828,7 +1948,7 @@ static constexpr uintptr_t RVA_ParkourTry = 0x345FCC4;
 static const uint8_t TRY_PROLOGUE[18] = { 0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x08, 0x06, 0x00, 0x00 };
 
 static bool HookParkourTry(void* self, void* pawn, void* req, void* dir, uint8_t* wantDodge) {
-    if (g_coolParkour && g_enabled && GetCurrentThreadId() == g_gameThread.load()) {
+    if (false && g_coolParkour && g_enabled && GetCurrentThreadId() == g_gameThread.load()) {   // 1.3: cooldown = automatic traversal only
         if (wantDodge) *wantDodge = 0;                      // no traversal, and the button doesn't turn into a dodge either
         return false;
     }
@@ -1883,6 +2003,9 @@ static void InstallAutoTraversalGate(uintptr_t base) {
     auto abs64 = [&](uint64_t v) { *reinterpret_cast<uint64_t*>(p) = v; p += 8; };
     *p++ = 0x48; *p++ = 0xB8; abs64(reinterpret_cast<uint64_t>(&g_coolParkour));          // mov rax,&g_coolParkour
     *p++ = 0x80; *p++ = 0x38; *p++ = 0x00;                                               // cmp byte [rax],0
+    *p++ = 0x75; *p++ = 52;                                                              // jne blocked (15 + 37 bytes on)
+    *p++ = 0x48; *p++ = 0xB8; abs64(reinterpret_cast<uint64_t>(&g_sideOnly));            // mov rax,&g_sideOnly
+    *p++ = 0x80; *p++ = 0x38; *p++ = 0x00;                                               // cmp byte [rax],0
     *p++ = 0x75; *p++ = 37;                                                              // jne blocked
     memcpy(p, AT_BYTES, 11); p += 11;                                                    // lea rdx,[rsp+110h] ; mov rcx,rsi
     *p++ = 0x48; *p++ = 0xB8; abs64(base + RVA_ActRequest);                              // mov rax,0x1511E94
@@ -1897,7 +2020,7 @@ static void InstallAutoTraversalGate(uintptr_t base) {
     memcpy(t, patch, sizeof(patch));
     VirtualProtect(t, sizeof(patch), old, &old);
     FlushInstructionCache(GetCurrentProcess(), t, sizeof(patch));
-    Log("automatic traversal gated (cooldown)");
+    Log("automatic traversal gated (cooldown, side-found ledges)");
 }
 
 // Diagnostic: every action request (0x1511E94(queue, request*); requests are polymorphic, vtable first) on the game
@@ -2010,7 +2133,8 @@ static std::atomic<unsigned> g_detCalls{0}, g_detSideHits{0};
 static std::atomic<long long> g_detTicks{0};
 
 static bool HookLedgeDetect(const float* xf, float reach, void* out, void* a4, void* a5, void* a6, void* a7) {
-    if (g_detOrig(xf, reach, out, a4, a5, a6, a7)) return true;
+    if (g_detOrig(xf, reach, out, a4, a5, a6, a7)) { g_sideOnly = 0; return true; }
+    g_sideOnly = 0;
     const float ang = g_steer.sideAngle;
     if (!g_enabled || !(ang > 0.f) || !xf) return false;
     LARGE_INTEGER t0, t1; QueryPerformanceCounter(&t0);
@@ -2025,6 +2149,7 @@ static bool HookLedgeDetect(const float* xf, float reach, void* out, void* a4, v
     }
     QueryPerformanceCounter(&t1); g_detTicks += t1.QuadPart - t0.QuadPart;
     if (hit) {
+        g_sideOnly = 1;
         unsigned n = ++g_detSideHits;
         if (n <= 20) Log("ledge found %+.0f deg to the side", used);
     }
@@ -2456,7 +2581,7 @@ static void ArmWatchpoint() {
 }
 
 static DWORD WINAPI MainThread(LPVOID) {
-    Log("A Bit Better Traversal Movement v1.2.0 running, base=%p", (void*)g_base);
+    Log("A Bit Better Traversal Movement v1.3.0 running, base=%p", (void*)g_base);
     for (int tries = 0; !FindAnimSequenceClass(); ++tries) {
         if (tries == 600) { Log("AnimSequence class or RateScale not found - the mod is off"); return 0; }
         Sleep(1000);
@@ -2569,7 +2694,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID) {
         if (!m || GetLastError() == ERROR_ALREADY_EXISTS) return TRUE;
         wchar_t path[MAX_PATH]; IniPath(path, L"TraversalSpeed.log");
         g_log = _wfopen(path, L"w");
-        Log("A Bit Better Traversal Movement v1.2.0 loaded");
+        Log("A Bit Better Traversal Movement v1.3.0 loaded");
         g_base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
         if (!IsSupportedBuild(g_base)) {
             Log("this game version is not supported (game update?) - the mod is off, the game runs unmodified");
