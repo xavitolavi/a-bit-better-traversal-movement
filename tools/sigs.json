@@ -1,0 +1,82 @@
+{
+ "ProcessEvent": {
+  "kind": "code",
+  "rva": 26837488,
+  "pattern": "40 55 56 57 41 54 41 55 41 56 41 57 B8 F0 00 00 00",
+  "disp": -1
+ },
+ "ParkourTry": {
+  "kind": "code",
+  "rva": 54918340,
+  "pattern": "40 55 53 56 57 41 54 41 55 41 56 41 57 B8 08 06 00 00",
+  "disp": -1
+ },
+ "ParkourUpdate": {
+  "kind": "code",
+  "rva": 19928132,
+  "pattern": "48 89 5C 24 18 48 89 74 24 20 57 41 54 41 55 41 56 41 57 B8 40 03 00 00 E8 ?? ?? ?? ?? 48 2B E0 C5 F8 29 B4 24 30 03 00 00 C5 F8 29 BC 24 20 03 00 00 C5 78 29 84 24 10 03 00 00",
+  "disp": -1
+ },
+ "ActRequest": {
+  "kind": "code",
+  "rva": 22093460,
+  "pattern": "48 8B C4 48 89 58 08 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8D 68 A1 B8 B0 00 00 00 E8 ?? ?? ?? ?? 48 2B E0 48 8B F2 48 8B F9",
+  "disp": -1
+ },
+ "LedgeDetect": {
+  "kind": "code",
+  "rva": 19936932,
+  "pattern": "40 53 56 57 41 54 41 55 41 56 41 57 B8 20 07 00 00",
+  "disp": -1
+ },
+ "TeleportReason": {
+  "kind": "code",
+  "rva": 26480148,
+  "pattern": "48 85 C9 0F 84 ?? ?? ?? ?? 48 89 5C 24 18 56 57 41 56 B8 20 01 00 00",
+  "disp": -1
+ },
+ "AutoTrav": {
+  "kind": "code",
+  "rva": 19931027,
+  "pattern": "48 8D 94 24 10 01 00 00 48 8B CE E8 ?? ?? ?? ?? E9 ?? ?? ?? ??",
+  "disp": -1
+ },
+ "AutoTravNo": {
+  "kind": "code",
+  "rva": 19931096,
+  "pattern": "C5 FA 10 ?? ?? ?? ?? ?? C5 FA 10 ?? ?? ?? ?? ?? 8A 44 24 42 44 8A AC 24 98 03 00 00",
+  "disp": -1
+ },
+ "AutoTravYes": {
+  "kind": "code",
+  "rva": 19933357,
+  "pattern": "B8 01 00 00 00 E9 ?? ?? ?? ?? 45 84 F6 0F 84 ?? ?? ?? ?? 45 84 ED",
+  "disp": -1
+ },
+ "PromptReach": {
+  "kind": "code",
+  "rva": 19920116,
+  "pattern": "C5 FA 10 8C 24 68 03 00 00 48 89 44 24 30 4C 8D 8C 24 60 01 00 00",
+  "disp": -1
+ },
+ "SigSite": {
+  "kind": "code",
+  "rva": 17556188,
+  "pattern": "4C 8D 0D ?? ?? ?? ?? 89 5C 24 28 4C 8D 85 90 05 00 00",
+  "disp": -1
+ },
+ "GUObjectArray": {
+  "kind": "data",
+  "rva": 141683496,
+  "pattern": "C5 F8 77 E8 ?? ?? ?? ?? 8B 56 0C 48 8D 0D ?? ?? ?? ?? 89 55 C0 E8 ?? ?? ?? ?? 45 33 FF",
+  "disp": 14,
+  "delta": 0
+ },
+ "NameBlocks": {
+  "kind": "data",
+  "rva": 151862288,
+  "pattern": "48 2B E0 45 0F B7 51 02 4C 8B F2 48 8B 15 ?? ?? ?? ?? 33 DB 49 8B F1 4D 8B F8",
+  "disp": 14,
+  "delta": 8
+ }
+}

@@ -1,10 +1,17 @@
-A Bit Better Traversal Movement  v1.3.0
-Final Fantasy VII Rebirth (PC, game version 1.0.0.5)
+A Bit Better Traversal Movement  v1.4.0-beta
+Final Fantasy VII Rebirth (PC, game version 1.0.0.5 or 1.0.0.4)
 
 Makes moving around the field feel less locked and stiff: faster traversal animations (vaults, drops, climbing walls,
 ladders, ropes, narrow gaps), snappier run starts, stops and turns, steering while falling,
 longer dodge rolls that can carry you off small ledges, landing where you actually fall, no running in place
 against walls, a camera that follows you down when you drop off a ledge, and more. Every setting is in TraversalSpeed.ini and applies live while you play.
+
+WHAT'S NEW IN 1.4 (BETA)
+- Works on game version 1.0.0.4 as well as 1.0.0.5. One dwmapi.dll for both: it recognises the game version at
+  startup (TraversalSpeed.log says "game build 1.0.0.4" or "game build 1.0.0.5").
+- Beta: the 1.0.0.4 support was built from the game's code and checked on 1.0.0.5, but not yet played on 1.0.0.4.
+  If you play 1.0.0.4, please report how it goes and send TraversalSpeed.log.
+- No gameplay changes from 1.3. Updating: just replace dwmapi.dll.
 
 WHAT'S NEW IN 1.3
 - Control comes back at the end of a traversal instead of after its whole animation ([transitions] landing_cancel):
@@ -48,7 +55,8 @@ options are read once at game start: restart after changing them). Every option 
 explained inside the file. enabled=0 turns the whole mod off.
 
 COMPATIBILITY
-- Game version 1.0.0.5 only. On any other version the mod detects it, writes that to the log and stays inactive.
+- Game versions 1.0.0.5 and 1.0.0.4 (1.0.0.4 in beta). On any other version the mod detects it, writes that to the log
+  and stays inactive.
 - Loads through dwmapi.dll: it conflicts with any other mod that also ships a dwmapi.dll. It works next to mods
   that use other loader files (for example hid.dll, winmm.dll, dsound.dll, xinput1_3.dll).
 - Linux / Steam Deck (Proton): untested. You will likely need the launch option WINEDLLOVERRIDES="dwmapi=n,b" %command%

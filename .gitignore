@@ -19,6 +19,12 @@
 !/tools/gen_dwmapi_proxy.py
 !/tools/sign_dll.ps1
 !/tools/make_release.py
+!/tools/sigmake.py
+!/tools/sigcompare.py
+!/tools/sigport.py
+!/tools/sigport2.py
+!/tools/sigs.json
+!/tools/build_1004.json
 !/tools/TraversalMovement-codesign.cer
 /release/*
 !/release/README.txt

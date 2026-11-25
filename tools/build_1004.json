@@ -1,0 +1,16 @@
+{
+ "_note": "Game 1.0.0.4 (TimeDateStamp 68FD6FDE, SizeOfImage 09BAD000) vs 1.0.0.5 (6A16CED2 / 099D9000). Found 2026-11-25 with sigmake.py check, sigport.py (alignment) and sigport2.py (callers); each function's instructions compared with sigcompare.py.",
+ "ProcessEvent":   {"rva1005": "019981F0", "rva1004": "008C03A4", "similarity": 0.91, "prologue_same": true},
+ "ParkourTry":     {"rva1005": "0345FCC4", "rva1004": "00A02F24", "similarity": 0.99, "prologue_same": false, "note": "stack 0x648 vs 0x608"},
+ "ParkourUpdate":  {"rva1005": "01301444", "rva1004": "00EECE8C", "similarity": 1.00, "prologue_same": false, "note": "stack 0x310 vs 0x340"},
+ "ActRequest":     {"rva1005": "01511E94", "rva1004": "01291D98", "similarity": 0.81, "prologue_same": false, "note": "different entry sequence"},
+ "LedgeDetect":    {"rva1005": "013036A4", "rva1004": "010506C0", "similarity": 0.99, "prologue_same": true},
+ "TeleportReason": {"rva1005": "01940E14", "rva1004": "03722108", "similarity": 0.94, "prologue_same": false, "note": "jz rel 0x226 vs 0x22C, different pushes"},
+ "AutoTrav":       {"rva1005": "01301F93", "rva1004": "00EED88E", "note": "lea rdx,[rsp+0E0h] vs [rsp+110h]"},
+ "AutoTravNo":     {"rva1005": "01301FD8", "rva1004": "00EED8D3"},
+ "AutoTravYes":    {"rva1005": "013028AD", "rva1004": "00EEE1B4"},
+ "PromptReach":    {"rva1005": "012FF4F4", "rva1004": "00EF01E0", "bytes_same": true},
+ "NameBlocks":     {"rva1005": "090D3C10", "rva1004": "0929A790"},
+ "GUObjectArray":  {"rva1005": "0871EB28", "rva1004": null, "note": "no reference ports cleanly: find at run time by structure"},
+ "same_in_both": "pawn+0x638 -> vfunc +0x98 = action request; end-of-traversal sequence and req offsets +0x8C/+0x90/+0x338 identical"
+}

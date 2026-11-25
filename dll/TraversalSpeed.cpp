@@ -41,11 +41,58 @@ static void InitDwmapiProxy() {
     }
 }
 
-// ---------------------------------------------------------------- build-specific addresses (same build as Final Foliage)
-static constexpr uintptr_t RVA_GUObjectArray = 0x871EB28;   // FUObjectArray
-static constexpr uintptr_t RVA_NameBlocks    = 0x90D3C10;   // FNamePool::Blocks[]
-static constexpr uintptr_t RVA_SigSite = 0x10BE2DC;         // build check: same bytes Final Foliage verifies
-static const uint8_t SIG_BYTES[] = { 0x4C, 0x8D, 0x0D, 0x0D, 0xE8, 0xFF, 0x07, 0x89, 0x5C, 0x24, 0x28 };
+// ---------------------------------------------------------------- build-specific addresses
+// One entry per supported game build, picked at startup by the exe's PE TimeDateStamp + SizeOfImage. Addresses and the
+// exact entry bytes of each hooked function come from tools/sigmake.py, sigport.py and sigport2.py (tools/build_1004.json).
+// GUObjectArray 0 = found at run time by its structure (FindGUObjectArray).
+struct GameBuild {
+    const char* name; uint32_t stamp, imageSize;
+    uint32_t guObjArr, nameBlocks, processEvent, parkourTry, parkourUpdate, ledgeDetect, teleport,
+             autoTrav, autoTravNo, autoTravYes, actRequest, promptReach;
+    uint8_t pe[17], tryP[18], pu[24], ld[17], tp[14], at[21], pr[9];
+};
+static const GameBuild GAME_BUILDS[] = {
+    { "1.0.0.5", 0x6A16CED2, 0x099D9000,
+      0x871EB28, 0x90D3C10, 0x19981F0, 0x345FCC4, 0x1301444, 0x13036A4, 0x1940E14,
+      0x1301F93, 0x1301FD8, 0x13028AD, 0x1511E94, 0x12FF4F4,
+      { 0x40, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0xF0, 0x00, 0x00, 0x00 },
+      { 0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x08, 0x06, 0x00, 0x00 },
+      { 0x48, 0x89, 0x5C, 0x24, 0x18, 0x48, 0x89, 0x74, 0x24, 0x20, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x40, 0x03, 0x00, 0x00 },
+      { 0x40, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x20, 0x07, 0x00, 0x00 },
+      { 0x48, 0x85, 0xC9, 0x0F, 0x84, 0x2C, 0x02, 0x00, 0x00, 0x48, 0x89, 0x5C, 0x24, 0x18 },
+      { 0x48, 0x8D, 0x94, 0x24, 0x10, 0x01, 0x00, 0x00, 0x48, 0x8B, 0xCE, 0xE8, 0xF1, 0xFE, 0x20, 0x00, 0xE9, 0x05, 0x09, 0x00, 0x00 },
+      { 0xC5, 0xFA, 0x10, 0x8C, 0x24, 0x68, 0x03, 0x00, 0x00 } },
+    { "1.0.0.4", 0x68FD6FDE, 0x09BAD000,
+      0, 0x929A790, 0x8C03A4, 0xA02F24, 0xEECE8C, 0x10506C0, 0x3722108,
+      0xEED88E, 0xEED8D3, 0xEEE1B4, 0x1291D98, 0xEF01E0,
+      { 0x40, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0xF0, 0x00, 0x00, 0x00 },
+      { 0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x48, 0x06, 0x00, 0x00 },
+      { 0x48, 0x89, 0x5C, 0x24, 0x18, 0x48, 0x89, 0x74, 0x24, 0x20, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x10, 0x03, 0x00, 0x00 },
+      { 0x40, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x20, 0x07, 0x00, 0x00 },
+      { 0x48, 0x85, 0xC9, 0x0F, 0x84, 0x26, 0x02, 0x00, 0x00, 0x48, 0x89, 0x5C, 0x24, 0x18 },
+      { 0x48, 0x8D, 0x94, 0x24, 0xE0, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xCE, 0xE8, 0xFA, 0x44, 0x3A, 0x00, 0xE9, 0x11, 0x09, 0x00, 0x00 },
+      { 0xC5, 0xFA, 0x10, 0x8C, 0x24, 0x68, 0x03, 0x00, 0x00 } },
+};
+static const GameBuild* g_build = nullptr;
+#define RVA_NameBlocks     (g_build->nameBlocks)
+#define RVA_ProcessEvent   (g_build->processEvent)
+#define RVA_ParkourTry     (g_build->parkourTry)
+#define RVA_ParkourUpdate  (g_build->parkourUpdate)
+#define RVA_LedgeDetect    (g_build->ledgeDetect)
+#define RVA_TeleportReason (g_build->teleport)
+#define RVA_AutoTrav       (g_build->autoTrav)
+#define RVA_AutoTravNo     (g_build->autoTravNo)
+#define RVA_AutoTravYes    (g_build->autoTravYes)
+#define RVA_ActRequest     (g_build->actRequest)
+#define RVA_PromptReach    (g_build->promptReach)
+#define PE_PROLOGUE        (g_build->pe)
+#define TRY_PROLOGUE       (g_build->tryP)
+#define PU_PROLOGUE        (g_build->pu)
+#define LD_PROLOGUE        (g_build->ld)
+#define TP_PROLOGUE        (g_build->tp)
+#define AT_BYTES           (g_build->at)
+#define PR_ORIG            (g_build->pr)
+static std::atomic<uintptr_t> g_guObjArr{0};   // absolute address of GUObjectArray (FUObjectArray) once known
 
 // ---------------------------------------------------------------- engine layout (UE 4.26)
 static constexpr int OFF_UObject_Class = 0x10, OFF_UObject_Name = 0x18, OFF_UObject_Outer = 0x20;
@@ -203,7 +250,6 @@ struct SteerCfg {
     bool landCancel = false;                                // [transitions] landing_cancel
     float landCancelMove = 0.15f;                           // [transitions] landing_cancel_move
     uint32_t landCancelFlags = 0x21EF;                      // [transitions] landing_cancel_flags (hex, hidden)
-    float hopHeight = 0.f, hopTime = 0.45f;                 // [roll] hop_height (cm), hop_time (s)
     float rollDistStand = 1.6f, rollMaxRise = 60.f;         // [roll] distance_standing, max_rise (cm)
 };
 static SteerCfg g_steer;
@@ -535,11 +581,6 @@ static bool LoadIni() {
     GetPrivateProfileStringW(L"transitions", L"landing_cancel_move", L"0", v, 32, path); sc.landCancelMove = (float)_wtof(v);
     if (!(sc.landCancelMove >= 0.f && sc.landCancelMove <= 2.f)) sc.landCancelMove = 0.f;
     GetPrivateProfileStringW(L"transitions", L"landing_cancel_flags", L"21EF", v, 32, path); sc.landCancelFlags = (uint32_t)wcstoul(v, nullptr, 16);
-    // hop_height / hop_time: hidden, off (the foot IK keeps the visible body on the ground, so the arc does not show)
-    GetPrivateProfileStringW(L"roll", L"hop_height", L"0", v, 32, path); sc.hopHeight = (float)_wtof(v);
-    GetPrivateProfileStringW(L"roll", L"hop_time", L"0.45", v, 32, path); sc.hopTime = (float)_wtof(v);
-    if (!(sc.hopHeight >= 0.f && sc.hopHeight <= 100.f)) sc.hopHeight = 0.f;
-    if (!(sc.hopTime >= 0.1f && sc.hopTime <= 1.5f)) sc.hopTime = 0.45f;
     if (!GetPrivateProfileStringW(L"roll", L"distance_standing", L"", v, 32, path)) { WritePrivateProfileStringW(L"roll", L"distance_standing", L"1.6", path); WritePrivateProfileStringW(L"roll", L"max_rise", L"60", path); }
     GetPrivateProfileStringW(L"roll", L"distance_standing", L"1.6", v, 32, path); sc.rollDistStand = (float)_wtof(v);
     GetPrivateProfileStringW(L"roll", L"max_rise", L"60", v, 32, path); sc.rollMaxRise = (float)_wtof(v);
@@ -603,7 +644,8 @@ struct Entry { uint32_t nameIdx; uintptr_t outer; int8_t group; };
 static std::unordered_map<uintptr_t, Entry> g_seen;   // AnimSequence object -> classification
 
 template <class F> static void ForEachObject(F fn) {
-    uintptr_t arr = g_base + RVA_GUObjectArray + 0x10, chunks = 0; int32_t num = 0;
+    uintptr_t ga = g_guObjArr.load(); if (!ga) return;
+    uintptr_t arr = ga + 0x10, chunks = 0; int32_t num = 0;
     if (!Rd(arr, chunks) || !Rd(arr + 0x14, num) || !chunks || num <= 0) return;
     for (int32_t c = 0; c * 65536 < num; ++c) {
         uintptr_t chunk = 0;
@@ -653,7 +695,6 @@ static std::atomic<uintptr_t> g_playSlotFn{0}, g_stopSlotFn{0};   // UAnimInstan
 static std::atomic<uintptr_t> g_traceFn{0}, g_kslCdo{0};   // UKismetSystemLibrary::LineTraceSingle and the library default object
 static std::atomic<uintptr_t> g_floorFn{0};       // UFunction UCharacterMovementComponent::K2_ComputeFloorDist
 static std::atomic<uintptr_t> g_setLocFn{0};      // UFunction AActor::K2_SetActorLocation (found by the object walk)
-static std::atomic<uintptr_t> g_setRelFn{0};      // UFunction USceneComponent::K2_SetRelativeLocation (roll hop)
 static uintptr_t g_resParamObj = 0;                // /Game/DataObject/Resident/ResidentParameter (global tunables)
 
 static void Pass() {
@@ -719,13 +760,6 @@ static void Pass() {
             if (Rd(obj + OFF_UObject_Name, ni) && NameStr(ni) == "K2_ComputeFloorDist" && ObjName(cls) == "Function") {
                 uintptr_t outer = 0; Rd(obj + OFF_UObject_Outer, outer);
                 if (outer && ObjName(outer) == "CharacterMovementComponent") g_floorFn.store(obj);
-            }
-        }
-        if (!g_setRelFn.load()) {
-            uint32_t ni = 0;
-            if (Rd(obj + OFF_UObject_Name, ni) && NameStr(ni) == "K2_SetRelativeLocation" && ObjName(cls) == "Function") {
-                uintptr_t outer = 0; Rd(obj + OFF_UObject_Outer, outer);
-                if (outer && ObjName(outer) == "SceneComponent") g_setRelFn.store(obj);
             }
         }
         if (!g_setLocFn.load()) {
@@ -864,13 +898,11 @@ struct SteerTargets {
     uintptr_t traceFn = 0, kslCdo = 0; int lWorld = -1, lStart = -1, lEnd = -1, lChan = -1, lComplex = -1, lIgnoreSelf = -1, lParms = 0,
         lHit = -1, lImpact = -1, lNormal = -1, lRet = -1; uint8_t mLHit = 0;   // LineTraceSingle parameters (OutHit fields)
     uintptr_t ai = 0;       // the character's anim instance (mesh AnimScriptInstance)
-    uintptr_t mesh = 0;     // the character's skeletal mesh component (roll hop arc)
     uintptr_t actReq = 0;   // the character's action request: [[pawn+0x638]+0x1B8]; +0x90 = action type (4 dodge, 8 parkour)
 };
 static SteerTargets g_tg[2];
 static std::atomic<int> g_tgFront{0};
 static int g_offPawn = -1, g_offCamMgr = -1, g_offCamYaw = -1, g_offRoot = -1, g_offCmc = -1, g_offRelRot = -1, g_offVel = -1, g_offMode = -1, g_offRelLoc = -1;
-static int g_relNew = -1, g_relTeleport = -1, g_relParms = 0;   // K2_SetRelativeLocation parameters
 static int g_pNewLoc = -1, g_pSweep = -1, g_pTeleport = -1, g_parmsSize = 0, g_pBlock = -1, g_pPenetr = -1, g_pNormZ = -1;
 static int g_pHitActor = -1, g_pHitComp = -1;
 static uint8_t g_mBlock = 0, g_mPenetr = 0;
@@ -1032,23 +1064,13 @@ static void UpdateSteerTargets() {
                 uintptr_t mesh = 0; if (offMesh >= 0) Rd(pawn + offMesh, mesh);
                 if (mesh && offAnim < 0) { uintptr_t mc = 0; Rd(mesh + OFF_UObject_Class, mc); offAnim = FindProp(mc, "AnimScriptInstance"); }
                 uintptr_t ai = 0; if (mesh && offAnim >= 0) Rd(mesh + offAnim, ai);
-                t.ai = ai; t.mesh = mesh;
+                t.ai = ai;
                 if (ai) { HookAnimVtable(ai); ApplyLocoBlend(ai); }
             }
             uintptr_t x = 0, req = 0; uint32_t ty = 0;
             if (Rd(pawn + 0x638, x) && x && Rd(x + 0x1B8, req) && req && Rd(req + 0x90, ty) && ty < 64) t.actReq = req;
         }
         t.pc = pc;
-    }
-    {   // K2_SetRelativeLocation(NewRelativeLocation, bSweep, SweepHitResult&, bTeleport)
-        uintptr_t rf = g_setRelFn.load();
-        if (rf && g_relParms <= 0) {
-            g_relNew = FindProp(rf, "NewLocation"); if (g_relNew < 0) g_relNew = FindProp(rf, "NewRelativeLocation");
-            g_relTeleport = FindProp(rf, "bTeleport");
-            int32_t sz = 0; Rd(rf + 0x58, sz);
-            if (g_relNew >= 0 && sz > 0 && sz <= 512) { g_relParms = sz; Log("roll hop: K2_SetRelativeLocation params %d bytes", sz); }
-            else { static bool once = false; if (!once) { once = true; Log("roll hop: K2_SetRelativeLocation layout not found (new %d size %d)", g_relNew, sz); } }
-        }
     }
     uintptr_t fn = g_setLocFn.load();
     if (fn && g_pNewLoc < 0) {
@@ -1260,8 +1282,6 @@ typedef void (*ProcessEventFn)(void*, void*, void*);
 static ProcessEventFn g_peOrig = nullptr;
 // UObject::ProcessEvent = vtable slot 69 (0x228) for plain objects (actors override it with AActor::ProcessEvent,
 // which forwards here). Opening: push rbp/rsi/rdi/r12-r15; mov eax,0F0h = 17 relocatable bytes, then a rel32 call.
-static constexpr uintptr_t RVA_ProcessEvent = 0x19981F0;
-static const uint8_t PE_PROLOGUE[17] = { 0x40, 0x55, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0xF0, 0x00, 0x00, 0x00 };
 static thread_local bool t_inTick = false;
 static std::atomic<DWORD> g_gameThread{0};
 
@@ -1433,7 +1453,7 @@ struct MoveState {
     uint32_t lastAct = 0; double travEndT = -100, rollT0Block = -100; unsigned cooldowns = 0, smallTrav = 0; float travZ0 = 0;
     bool ffOn = false, snapGuard = false, haveExpect = false; float ffV[2] = {}, expect[3] = {}; double snapT0 = -100;
     float winSpeed = 0.f, winPos[2] = {}; double winT = -1.0;
-    double hopT0 = -100; bool hopOn = false; float hopBaseZ = 0.f; bool standingRoll = false;
+    bool standingRoll = false;
     unsigned ffRestores = 0, snapUndos = 0, cliffStops = 0, edgeCarries = 0; bool steppedOff = false, offActive = false; float offPushed = 0.f; bool stretchedThisRoll = false;
 };
 static MoveState g_ms;
@@ -1504,27 +1524,6 @@ static void GameTick() {
         }
         keyWas = key;
     }
-    // roll hop ([roll] hop_height): the visible body follows a small arc during the roll; the collision capsule stays on the
-    // ground, so nothing can get stuck. The mesh is moved with K2_SetRelativeLocation (its transform updates at once) and
-    // put back at its own height when the roll ends.
-    if (t.mesh && g_relParms > 0 && g_relNew >= 0) {
-        auto setZ = [&](float z) {
-            uint8_t parms[512] = {};
-            float loc[3] = {}; if (!RdBytes(t.mesh + 0x11C, loc, 12)) return;
-            loc[2] = z; memcpy(parms + g_relNew, loc, 12);
-            if (g_relTeleport >= 0) parms[g_relTeleport] = 1;
-            g_peOrig(reinterpret_cast<void*>(t.mesh), reinterpret_cast<void*>(g_setRelFn.load()), parms);
-        };
-        float age = (float)(now - m.hopT0);
-        bool want = sc.hopHeight > 0.f && dodging && mode == 1 && age >= 0.f && age < sc.hopTime;
-        if (want) {
-            if (!m.hopOn) { if (!Rd(t.mesh + 0x11C + 8, m.hopBaseZ)) want = false; else m.hopOn = true; }
-            if (m.hopOn) {
-                setZ(m.hopBaseZ + sc.hopHeight * std::sin(3.14159265f * age / sc.hopTime));
-            }
-        }
-        if (!want && m.hopOn) { setZ(m.hopBaseZ); m.hopOn = false; }
-    }
     // free fall, part 2: after a jump-down touches down the game slides the character onto its chosen landing spot
     // while the traversal (type 8) is still running. Undo any movement the game adds on its own in that phase.
     if (false && sc.freeFall) {   // off: it fought the game's own landing pin (frame-by-frame flicker); see TeleportHook
@@ -1557,7 +1556,7 @@ static void GameTick() {
     g_coolingNow = cooling ? 1 : 0;
     g_coolParkour = (cooling && kCoolBlock) ? 1 : 0;
     if (dodging && !m.keyWas && mode == 1) {
-        m.rollT0 = m.blockRollT0 = m.rollT0Block = m.hopT0 = now; m.rollZ0 = pos[2]; memcpy(m.lastPos, pos, 12); m.haveLast = true;
+        m.rollT0 = m.blockRollT0 = m.rollT0Block = now; m.rollZ0 = pos[2]; memcpy(m.lastPos, pos, 12); m.haveLast = true;
         m.standingRoll = m.winSpeed < 120.f;   // rolled from (almost) standing still: the game's own roll is shorter then
         m.dirSet = m.edgeStop = m.pushedThisRoll = m.stretchedThisRoll = m.steppedOff = m.offActive = false; m.offPushed = 0.f; m.peak = 0;
         if (!sc.rollVault) ++m.travBlocks;
@@ -1944,8 +1943,6 @@ static bool InstallProcessEventHook(uintptr_t base) {
 // button or by rolling into a ledge). Standing next to a ledge, the button still climbs, as in the unmodded game.
 typedef bool (*ParkourTryFn)(void*, void*, void*, void*, uint8_t*);
 static ParkourTryFn g_tryOrig = nullptr;
-static constexpr uintptr_t RVA_ParkourTry = 0x345FCC4;
-static const uint8_t TRY_PROLOGUE[18] = { 0x40, 0x55, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x08, 0x06, 0x00, 0x00 };
 
 static bool HookParkourTry(void* self, void* pawn, void* req, void* dir, uint8_t* wantDodge) {
     if (false && g_coolParkour && g_enabled && GetCurrentThreadId() == g_gameThread.load()) {   // 1.3: cooldown = automatic traversal only
@@ -1969,9 +1966,6 @@ static bool HookParkourTry(void* self, void* pawn, void* req, void* dir, uint8_t
 // is gated too: a register-preserving stub returns 0 ("nothing started") while g_blockParkour is set (a roll is
 // playing and roll_vault=0), otherwise it jumps to the original. Opening: mov [rsp+18h],rbx; mov [rsp+20h],rsi;
 // push rdi/r12-r15; mov eax,340h = 24 relocatable bytes.
-static constexpr uintptr_t RVA_ParkourUpdate = 0x1301444;
-static const uint8_t PU_PROLOGUE[24] = { 0x48, 0x89, 0x5C, 0x24, 0x18, 0x48, 0x89, 0x74, 0x24, 0x20, 0x57, 0x41, 0x54,
-                                         0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x40, 0x03, 0x00, 0x00 };
 static void InstallParkourUpdateGate(uintptr_t base) {
     uint8_t* stub = static_cast<uint8_t*>(VirtualAlloc(nullptr, 64, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
     if (!stub) return;
@@ -1991,9 +1985,6 @@ static void InstallParkourUpdateGate(uintptr_t base) {
 // The parkour update starts AUTOMATIC traversal (running off a small ledge) at 0x1301F93:
 //   lea rdx,[rsp+110h] ; mov rcx,rsi ; call 0x1511E94 ; jmp 0x13028AD (= "started")
 // During the cooldown that call is skipped and the update carries on at 0x1301FD8 as if no traversal was found.
-static constexpr uintptr_t RVA_AutoTrav = 0x1301F93, RVA_AutoTravNo = 0x1301FD8, RVA_AutoTravYes = 0x13028AD, RVA_ActRequest = 0x1511E94;
-static const uint8_t AT_BYTES[21] = { 0x48, 0x8D, 0x94, 0x24, 0x10, 0x01, 0x00, 0x00, 0x48, 0x8B, 0xCE, 0xE8, 0xF1, 0xFE, 0x20, 0x00,
-                                      0xE9, 0x05, 0x09, 0x00, 0x00 };
 static void InstallAutoTraversalGate(uintptr_t base) {
     uint8_t* t = reinterpret_cast<uint8_t*>(base + RVA_AutoTrav);
     if (memcmp(t, AT_BYTES, sizeof(AT_BYTES)) != 0) { Log("automatic traversal call differs - cooldown covers button traversal only"); return; }
@@ -2076,8 +2067,6 @@ static void InstallActReqHook(uintptr_t base) {
 // character; how far ahead is a float argument loaded at 0x12FF4F4 (vmovss xmm1,[rsp+368h]). It decides both when the
 // Acrobacias prompt shows and when the button can start a traversal. A stub keeps the game's value, records it, and
 // multiplies it by prompt_reach (1 = normal, smaller = the prompt appears closer to the edge).
-static constexpr uintptr_t RVA_PromptReach = 0x12FF4F4;
-static const uint8_t PR_ORIG[9] = { 0xC5, 0xFA, 0x10, 0x8C, 0x24, 0x68, 0x03, 0x00, 0x00 };
 static void InstallPromptReach(uintptr_t base) {
     uint8_t* t = reinterpret_cast<uint8_t*>(base + RVA_PromptReach);
     if (memcmp(t, PR_ORIG, sizeof(PR_ORIG)) != 0) { Log("prompt reach instruction differs - prompt_reach off"); return; }
@@ -2127,8 +2116,6 @@ static void InstallParkourTryHook(uintptr_t base) {
 // it is asked again with the facing turned side_angle degrees right, then left.
 typedef bool (*LedgeDetectFn)(const float*, float, void*, void*, void*, void*, void*);
 static LedgeDetectFn g_detOrig = nullptr;
-static constexpr uintptr_t RVA_LedgeDetect = 0x13036A4;
-static const uint8_t LD_PROLOGUE[17] = { 0x40, 0x53, 0x56, 0x57, 0x41, 0x54, 0x41, 0x55, 0x41, 0x56, 0x41, 0x57, 0xB8, 0x20, 0x07, 0x00, 0x00 };
 static std::atomic<unsigned> g_detCalls{0}, g_detSideHits{0};
 static std::atomic<long long> g_detTicks{0};
 
@@ -2439,8 +2426,6 @@ static void LogPosWriters() {
 // FieldTargetJumpCancelTeleport (the game putting him back when a jump is cancelled) is left alone.
 typedef void (*TeleportFn)(void*, const void*, const uint32_t*);
 static TeleportFn g_tpOrig = nullptr;
-static constexpr uintptr_t RVA_TeleportReason = 0x1940E14;
-static const uint8_t TP_PROLOGUE[14] = { 0x48, 0x85, 0xC9, 0x0F, 0x84, 0x2C, 0x02, 0x00, 0x00, 0x48, 0x89, 0x5C, 0x24, 0x18 };
 static std::atomic<unsigned> g_tpSkipped{0}, g_tpPassed{0}, g_tpKept{0};
 static uint32_t g_tpSeen[16]; static unsigned g_tpSeenN = 0; static uint32_t g_tpSeenKind[16];
 
@@ -2580,11 +2565,23 @@ static void ArmWatchpoint() {
     ResumeThread(th); CloseHandle(th);
 }
 
+static uintptr_t FindGUObjectArray(uintptr_t base);
 static DWORD WINAPI MainThread(LPVOID) {
-    Log("A Bit Better Traversal Movement v1.3.0 running, base=%p", (void*)g_base);
+    Log("A Bit Better Traversal Movement v1.4.0-beta running, base=%p", (void*)g_base);
+    for (int tries = 0; !g_guObjArr.load(); ++tries) {   // builds without a known address: find the object table
+        if (tries == 600) { Log("object table (GUObjectArray) not found - the mod is off"); return 0; }
+        uintptr_t a = FindGUObjectArray(g_base);
+        if (a) { g_guObjArr.store(a); Log("object table found at +0x%llX", (unsigned long long)(a - g_base)); break; }
+        Sleep(1000);
+    }
     for (int tries = 0; !FindAnimSequenceClass(); ++tries) {
         if (tries == 600) { Log("AnimSequence class or RateScale not found - the mod is off"); return 0; }
         Sleep(1000);
+    }
+    if (g_build->guObjArr) {   // known build: check the structural search against the known address (for new builds)
+        uintptr_t a = FindGUObjectArray(g_base);
+        Log("object table self-test: structure search %s (+0x%llX)", a == g_guObjArr.load() ? "matches" : "DIFFERS",
+            (unsigned long long)(a ? a - g_base : 0));
     }
     { HANDLE st = CreateThread(nullptr, 0, SteerThread, nullptr, 0, nullptr); if (st) CloseHandle(st); }
     for (;;) {
@@ -2598,7 +2595,7 @@ static DWORD WINAPI MainThread(LPVOID) {
             const DiagEntry& e = g_diag[g_diagR++];
             auto describe = [](int32_t idx, char* out, size_t n) {
                 out[0] = 0; if (idx <= 0) { snprintf(out, n, "none"); return; }
-                uintptr_t arr = g_base + RVA_GUObjectArray + 0x10, chunks = 0, chunk = 0, obj = 0;
+                uintptr_t arr = g_guObjArr.load() + 0x10, chunks = 0, chunk = 0, obj = 0;
                 if (!Rd(arr, chunks) || !Rd(chunks + 8 * (idx / 65536), chunk) || !chunk || !Rd(chunk + 24 * (idx % 65536), obj) || !obj) { snprintf(out, n, "#%d ?", idx); return; }
                 uintptr_t cls = 0, outer = 0; Rd(obj + OFF_UObject_Class, cls); Rd(obj + OFF_UObject_Outer, outer);
                 snprintf(out, n, "%s (%s) in %s", ObjName(obj).c_str(), cls ? ObjName(cls).c_str() : "?", outer ? ObjName(outer).c_str() : "?");
@@ -2625,8 +2622,43 @@ static DWORD WINAPI MainThread(LPVOID) {
 
 static bool IsSupportedBuild(uintptr_t base) {
     auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + reinterpret_cast<IMAGE_DOS_HEADER*>(base)->e_lfanew);
-    if (RVA_SigSite + sizeof(SIG_BYTES) > nt->OptionalHeader.SizeOfImage) return false;
-    return memcmp(reinterpret_cast<void*>(base + RVA_SigSite), SIG_BYTES, sizeof(SIG_BYTES)) == 0;
+    for (const GameBuild& b : GAME_BUILDS)
+        if (nt->FileHeader.TimeDateStamp == b.stamp && nt->OptionalHeader.SizeOfImage == b.imageSize) { g_build = &b; break; }
+    if (!g_build) { Log("game exe: TimeDateStamp %08X, image size %08X - not a supported build", nt->FileHeader.TimeDateStamp,
+                        nt->OptionalHeader.SizeOfImage); return false; }
+    Log("game build %s", g_build->name);
+    if (g_build->guObjArr) g_guObjArr.store(base + g_build->guObjArr);
+    return true;
+}
+
+// GUObjectArray by structure (any build): FUObjectArray in a writable section, whose ObjObjects (+0x10) is
+// { Objects**, PreAllocated*, MaxElements, NumElements, MaxChunks, NumChunks } with 65536 objects per chunk, and whose
+// first objects carry their own index (UObjectBase::InternalIndex, +0x0C). Run once objects exist (after boot).
+static uintptr_t FindGUObjectArray(uintptr_t base) {
+    auto* nt = reinterpret_cast<IMAGE_NT_HEADERS64*>(base + reinterpret_cast<IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    auto* sec = IMAGE_FIRST_SECTION(nt);
+    for (unsigned s = 0; s < nt->FileHeader.NumberOfSections; ++s, ++sec) {
+        if (!(sec->Characteristics & IMAGE_SCN_MEM_WRITE)) continue;
+        uintptr_t lo = base + sec->VirtualAddress, hi = lo + sec->Misc.VirtualSize;
+        for (uintptr_t a = lo; a + 0x30 <= hi; a += 8) {
+            __try {
+                const int32_t* f = reinterpret_cast<const int32_t*>(a + 0x20);
+                int32_t mx = f[0], num = f[1], mxc = f[2], nc = f[3];
+                if (num < 1000 || num > mx || mx > 0x4000000 || nc != (num + 65535) / 65536 || mxc < nc || mxc > 1024) continue;
+                uintptr_t chunks = *reinterpret_cast<const uintptr_t*>(a + 0x10);
+                if (chunks < 0x10000 || (chunks & 7)) continue;
+                uintptr_t c0 = *reinterpret_cast<const uintptr_t*>(chunks);
+                if (c0 < 0x10000 || (c0 & 7)) continue;
+                bool ok = true;
+                for (int i = 1; i < 6 && ok; ++i) {
+                    uintptr_t obj = *reinterpret_cast<const uintptr_t*>(c0 + 24 * i);
+                    ok = obj >= 0x10000 && !(obj & 7) && *reinterpret_cast<const int32_t*>(obj + 0x0C) == i;
+                }
+                if (ok) return a;
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+    }
+    return 0;
 }
 
 // ---------------------------------------------------------------- camera follows falls ([camera] fall_follow)
@@ -2694,7 +2726,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID) {
         if (!m || GetLastError() == ERROR_ALREADY_EXISTS) return TRUE;
         wchar_t path[MAX_PATH]; IniPath(path, L"TraversalSpeed.log");
         g_log = _wfopen(path, L"w");
-        Log("A Bit Better Traversal Movement v1.3.0 loaded");
+        Log("A Bit Better Traversal Movement v1.4.0-beta loaded");
         g_base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
         if (!IsSupportedBuild(g_base)) {
             Log("this game version is not supported (game update?) - the mod is off, the game runs unmodified");
