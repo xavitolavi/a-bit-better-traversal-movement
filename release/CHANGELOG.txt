@@ -1,10 +1,20 @@
 A Bit Better Traversal Movement - changelog
 
-1.4.0-beta (2026-11-25)
-- Game version 1.0.0.4 support (beta). The DLL picks a per-version table of game addresses at startup (by the exe's
-  timestamp and size) and finds the game's object table by its structure. Checked on 1.0.0.5 (same behaviour, the
+1.3.1 (2026-11-26)
+- Roll-offs onto the walkable area ([roll] max_drop_walkable=2500): when the floor isn't within max_drop, the roll
+  edge checks trace down to max_drop_walkable and ask the game's navigation system (ProjectPointToNavigation on the
+  party-sized nav mesh) whether the ground there is walkable; if it is, the roll goes off the edge. Out-of-bounds
+  ground has no nav mesh, so it still stops. Tested: reactor platforms (6-25 m, allowed), a 4.7 m grassland cliff
+  (allowed), out-of-bounds edges (23-27 m, stopped).
+- [traversal] drop_prompt_reach=0.6: when the ledge found leads down (floor ahead more than 60 cm below the feet, or
+  none), the ledge search is repeated at 60% of the reach, so jump-down prompts need you closer to the edge.
+- Wall stop fixes (players stuck until letting go of the stick): the "blocked without a wall hit" fallback only starts
+  while the game's own velocity is high and the character doesn't move, and re-checks every 0.6 s instead of holding
+  itself; head-on means within ~60 degrees; movable components (debris, props) never count as walls. The log notes
+  each wall stop and why (first 200).
+- Game version 1.0.0.4 support (beta; first published as 1.4.0-beta on 2026-11-25). The DLL picks a per-version
+  table of game addresses at startup (by the exe's timestamp and size) and finds the game's object table by its structure. Checked on 1.0.0.5 (same behaviour, the
   structure search finds the known address); not yet played on 1.0.0.4.
-- No gameplay changes from 1.3.0.
 
 1.3.0 (2026-11-25)
 - Traversal cancel ([transitions] landing_cancel=1): the end of a traversal is ended the game's own way (request code

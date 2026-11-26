@@ -1,4 +1,4 @@
-A Bit Better Traversal Movement  v1.4.0-beta
+A Bit Better Traversal Movement  v1.3.1
 Final Fantasy VII Rebirth (PC, game version 1.0.0.5 or 1.0.0.4)
 
 Makes moving around the field feel less locked and stiff: faster traversal animations (vaults, drops, climbing walls,
@@ -6,12 +6,21 @@ ladders, ropes, narrow gaps), snappier run starts, stops and turns, steering whi
 longer dodge rolls that can carry you off small ledges, landing where you actually fall, no running in place
 against walls, a camera that follows you down when you drop off a ledge, and more. Every setting is in TraversalSpeed.ini and applies live while you play.
 
-WHAT'S NEW IN 1.4 (BETA)
-- Works on game version 1.0.0.4 as well as 1.0.0.5. One dwmapi.dll for both: it recognises the game version at
-  startup (TraversalSpeed.log says "game build 1.0.0.4" or "game build 1.0.0.5").
-- Beta: the 1.0.0.4 support was built from the game's code and checked on 1.0.0.5, but not yet played on 1.0.0.4.
-  If you play 1.0.0.4, please report how it goes and send TraversalSpeed.log.
-- No gameplay changes from 1.3. Updating: just replace dwmapi.dll.
+WHAT'S NEW IN 1.3.1
+- Rolling off ledges reaches more places: drops deeper than max_drop are allowed too when the ground below is part
+  of the game's own walkable area (the map the party and enemies walk on), up to 25 m ([roll] max_drop_walkable).
+  Lower floors, broken floors and the levels below platforms you'd reach anyway now work; out-of-bounds ground isn't
+  on that map, so those edges still stop you. max_drop_walkable=0 = the 1.3 behaviour.
+- Drops need you closer to the edge: the Acrobacias prompt for jump-downs shows at 60% of the normal prompt reach
+  ([traversal] drop_prompt_reach), so you don't get the drop prompt while just walking near an edge. Climbs and
+  vaults keep their distance.
+- Fixed: getting stuck against a wall (unable to move until letting go of the stick) - the wall stop no longer
+  holds you when the game itself isn't pushing you into something, and loose debris / movable props don't count
+  as walls.
+- Game version 1.0.0.4 support (beta): one dwmapi.dll for 1.0.0.5 and 1.0.0.4, it recognises the version at startup
+  (TraversalSpeed.log says "game build 1.0.0.4" or "game build 1.0.0.5"). Not yet played on 1.0.0.4: if you play
+  that version, please report how it goes and send TraversalSpeed.log.
+Updating: just replace dwmapi.dll. Your TraversalSpeed.ini keeps your values and gets the new keys on the first start.
 
 WHAT'S NEW IN 1.3
 - Control comes back at the end of a traversal instead of after its whole animation ([transitions] landing_cancel):
@@ -65,8 +74,8 @@ KNOWN LIMITS / WHERE IT MIGHT GO WRONG
 - free_fall (landing where you fall): in places where a jump must land on one exact spot (dungeons, platforming,
   scripted jumps) the game's placement is kept when you'd end up on a different level, but some spots may still
   behave oddly. Set free_fall=0 if a jump misbehaves.
-- Rolling off ledges: unusual or very rough edges may still stop the roll, and out-of-bounds protection relies on
-  max_drop (drops deeper than that always stop you at the edge).
+- Rolling off ledges: unusual or very rough edges may still stop the roll. Out-of-bounds protection: drops deeper
+  than max_drop only go when the ground below is on the game's walkable area (and at most max_drop_walkable).
 - Wall stop: may occasionally miss a wall, or stop you against unusual geometry.
 - Hands-on-wall pose: it reuses a door-push animation, so it can clip or look off on uneven walls (wall_hand=0 turns it off).
 - Faster run starts/stops/turns: if the feet look like they slide on some surface, lower run_start, run_stop or turn

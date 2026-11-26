@@ -1,12 +1,12 @@
 r"""Build the release folder + zip.
-usage: python tools/make_release.py [version]   (default v1.4.0-beta)
+usage: python tools/make_release.py [version]   (default v1.3.1)
 
 The zip mirrors the game folder (End\...), so players copy the "End" folder into the game folder.
 Needs: dll/dwmapi.dll, built with dll\build.bat and signed with tools\sign_dll.ps1."""
 import os, shutil, subprocess, sys, zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VERSION = sys.argv[1] if len(sys.argv) > 1 else 'v1.4.0-beta'
+VERSION = sys.argv[1] if len(sys.argv) > 1 else 'v1.3.1'
 REL = os.path.join(ROOT, 'release')
 OUT = os.path.join(REL, 'A Bit Better Traversal Movement')
 DLL = os.path.join(ROOT, 'dll', 'dwmapi.dll')

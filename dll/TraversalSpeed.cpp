@@ -251,6 +251,8 @@ struct SteerCfg {
     float landCancelMove = 0.15f;                           // [transitions] landing_cancel_move
     uint32_t landCancelFlags = 0x21EF;                      // [transitions] landing_cancel_flags (hex, hidden)
     float rollDistStand = 1.6f, rollMaxRise = 60.f;         // [roll] distance_standing, max_rise (cm)
+    float dropPromptReach = 1.f;                            // [traversal] drop_prompt_reach (share of prompt_reach)
+    float maxDropWalk = 2500.f;                             // [roll] max_drop_walkable (cm; landing on the walkable map)
 };
 static SteerCfg g_steer;
 struct HandAnim { uintptr_t seq; char pc[8]; bool right; };          // wall-hand animation per character folder (PC0000, PC0009, ...)
@@ -331,6 +333,10 @@ static const char* RELEASE_INI =
     "; a roll only goes off an edge when there's walkable ground within this many cm below; bigger drops (big cliffs,\r\n"
     "; out-of-bounds edges) stop the roll at the edge like the normal game\r\n"
     "max_drop=450\r\n"
+    "; bigger drops (up to this many cm) are allowed too when the ground below is part of the game's walkable area\r\n"
+    ";   (the map the party and enemies walk on: lower floors, broken floors, water areas you reach later anyway).\r\n"
+    ";   Out-of-bounds ground isn't on it, so those edges still stop the roll.  0 = off (max_drop only)\r\n"
+    "max_drop_walkable=2500\r\n"
     "; distance (like the setting above) for a roll started from standing still, where the game's own roll is shorter\r\n"
     "distance_standing=1.6\r\n"
     "; rolling uphill keeps its stretch until it has climbed this many cm (higher = it went up onto something)\r\n"
@@ -382,6 +388,9 @@ static const char* RELEASE_INI =
     "; also look for a ledge this many degrees to either side of where the character faces, when there's none straight\r\n"
     "; ahead (0 = only straight ahead, like the normal game)\r\n"
     "side_angle=35\r\n"
+    "; for ledges that lead DOWN (jump-downs): share of prompt_reach, so drops only offer the prompt closer to the edge\r\n"
+    ";   than climbs and vaults (1 = same distance as prompt_reach)\r\n"
+    "drop_prompt_reach=0.6\r\n"
     "\r\n"
     "[camera]\r\n"
     "; 1 = the camera follows the character down while falling (e.g. after rolling off a ledge) instead of catching up\r\n"
@@ -586,6 +595,12 @@ static bool LoadIni() {
     GetPrivateProfileStringW(L"roll", L"max_rise", L"60", v, 32, path); sc.rollMaxRise = (float)_wtof(v);
     if (!(sc.rollDistStand >= 0.5f && sc.rollDistStand <= 3.f)) sc.rollDistStand = sc.rollDist;
     if (!(sc.rollMaxRise >= 0.f && sc.rollMaxRise <= 300.f)) sc.rollMaxRise = 60.f;
+    if (!GetPrivateProfileStringW(L"traversal", L"drop_prompt_reach", L"", v, 32, path)) WritePrivateProfileStringW(L"traversal", L"drop_prompt_reach", L"0.6", path);
+    GetPrivateProfileStringW(L"traversal", L"drop_prompt_reach", L"1", v, 32, path); sc.dropPromptReach = (float)_wtof(v);
+    if (!(sc.dropPromptReach > 0.f && sc.dropPromptReach <= 1.f)) sc.dropPromptReach = 1.f;
+    if (!GetPrivateProfileStringW(L"roll", L"max_drop_walkable", L"", v, 32, path)) WritePrivateProfileStringW(L"roll", L"max_drop_walkable", L"2500", path);
+    GetPrivateProfileStringW(L"roll", L"max_drop_walkable", L"2500", v, 32, path); sc.maxDropWalk = (float)_wtof(v);
+    if (!(sc.maxDropWalk >= 0.f && sc.maxDropWalk <= 10000.f)) sc.maxDropWalk = 2500.f;
     g_steer = sc;
     ++g_iniGen;
     Log("settings: enabled=%d up=%.2f down=%.2f land=%.2f cliff_stop=%.2f | steer=%d air=%d landing=%d window=%.2fs rate=%.0f keys=%.4s"
@@ -695,9 +710,16 @@ static std::atomic<uintptr_t> g_playSlotFn{0}, g_stopSlotFn{0};   // UAnimInstan
 static std::atomic<uintptr_t> g_traceFn{0}, g_kslCdo{0};   // UKismetSystemLibrary::LineTraceSingle and the library default object
 static std::atomic<uintptr_t> g_floorFn{0};       // UFunction UCharacterMovementComponent::K2_ComputeFloorDist
 static std::atomic<uintptr_t> g_setLocFn{0};      // UFunction AActor::K2_SetActorLocation (found by the object walk)
+static std::atomic<uintptr_t> g_navProjFn{0}, g_navCdo{0}, g_navMesh{0};   // NavigationSystemV1::ProjectPointToNavigation, its default object, EndRecastNavMesh-Normal00
+static int g_npWorld = -1, g_npPoint = -1, g_npNavData = -1, g_npExtent = -1, g_npRet = -1, g_npParms = 0;
+// roll edge events (game thread -> main thread, which logs them with the hit object's name)
+struct EdgeEv { float pos[3], dir[2], drop, deepDrop, navDz; bool deepHit; int32_t comp, deepComp; int nav; char why[24]; };
+static EdgeEv g_edgeQ[32]; static std::atomic<unsigned> g_edgeW{0}; static unsigned g_edgeR = 0;
+static void DrainEdgeEvents();
 static uintptr_t g_resParamObj = 0;                // /Game/DataObject/Resident/ResidentParameter (global tunables)
 
 static void Pass() {
+    DrainEdgeEvents();
     bool changed = LoadIni();
     if (changed) g_seen.clear();   // re-classify everything (normal_speed may have changed)
     unsigned matched = 0, written = 0, newly = 0, perGroup[G_COUNT] = {}, keptNormal = 0, customN = 0;
@@ -760,6 +782,17 @@ static void Pass() {
             if (Rd(obj + OFF_UObject_Name, ni) && NameStr(ni) == "K2_ComputeFloorDist" && ObjName(cls) == "Function") {
                 uintptr_t outer = 0; Rd(obj + OFF_UObject_Outer, outer);
                 if (outer && ObjName(outer) == "CharacterMovementComponent") g_floorFn.store(obj);
+            }
+        }
+        if (!g_navProjFn.load() || !g_navCdo.load() || !g_navMesh.load()) {
+            uint32_t ni = 0;
+            if (Rd(obj + OFF_UObject_Name, ni)) {
+                const std::string& n = NameStr(ni);
+                if (n == "ProjectPointToNavigation" && ObjName(cls) == "Function") {
+                    uintptr_t outer = 0; Rd(obj + OFF_UObject_Outer, outer);
+                    if (outer && ObjName(outer) == "NavigationSystemV1") g_navProjFn.store(obj);
+                } else if (n == "Default__NavigationSystemV1") g_navCdo.store(obj);
+                else if (n == "EndRecastNavMesh-Normal00" && ObjName(cls) == "EndRecastNavMesh") { g_navMesh.store(obj); Log("nav mesh (party size) %p", (void*)obj); }
             }
         }
         if (!g_setLocFn.load()) {
@@ -843,7 +876,8 @@ static void Pass() {
         }
     }
     { int back = 1 - g_charFront.load(); memcpy(g_charRoots[back], charRoots, sizeof(uintptr_t) * charN); g_charCount[back].store(charN); g_charFront.store(back); }
-    { static int lastN = -100; if (charN - lastN >= 5 || lastN - charN >= 5) { Log("characters ignored by wall stop: %d", charN); lastN = charN; } }
+    { static double lastT = -1e9; double tn = GetTickCount64() / 1000.0;
+      if (tn - lastT > 60.0) { Log("characters near the player (ignored by wall stop): %d", charN); lastT = tn; } }
     if (pc != g_pc.load()) { g_pc.store(pc); Log("player controller %p", (void*)pc); }
     if (written || changed) {
         char buf[512]; int p = 0;
@@ -858,6 +892,26 @@ static void Pass() {
 // only reads/writes plain memory with them. Steering = turn the controlled party character toward the movement
 // input (stick / keys relative to the camera) while falling (mode 3) and shortly after landing (the roll); in the
 // air the horizontal velocity turns with him. Vaults and climbs (flying mode 5) are never touched.
+static std::string IdxName(int32_t idx) {   // object by GUObjectArray index: "Outer.Name (Class)"
+    uintptr_t ga = g_guObjArr.load(); if (idx <= 0 || !ga) return "-";
+    uintptr_t chunks = 0, chunk = 0, obj = 0, cls = 0, outer = 0;
+    if (!Rd(ga + 0x10, chunks) || !chunks || !Rd(chunks + 8 * (uintptr_t)(idx / 65536), chunk) || !chunk ||
+        !Rd(chunk + 24 * (uintptr_t)(idx % 65536), obj) || !obj) return "?";
+    Rd(obj + OFF_UObject_Class, cls); Rd(obj + OFF_UObject_Outer, outer);
+    return (outer ? ObjName(outer) + "." : std::string()) + ObjName(obj) + " (" + (cls ? ObjName(cls) : std::string("?")) + ")";
+}
+static void DrainEdgeEvents() {
+    unsigned w = g_edgeW.load();
+    for (; g_edgeR != w; ++g_edgeR) {
+        const EdgeEv& e = g_edgeQ[g_edgeR % 32];
+        static unsigned nLogged = 0; if (++nLogged > 100) continue;
+        Log("roll edge: %s at (%.0f %.0f %.0f) dir (%.2f %.2f) | max_drop check: %s | 30 m look: %s %.0f cm below the feet on %s | nav map there: %s (moved %.0f cm)",
+            e.why, e.pos[0], e.pos[1], e.pos[2], e.dir[0], e.dir[1],
+            e.drop >= 0.f ? (std::to_string((int)e.drop) + " cm drop").c_str() : "no ground",
+            e.deepHit ? "ground" : "nothing", e.deepDrop, IdxName(e.deepComp).c_str(),
+            e.nav == 1 ? "YES" : e.nav == 0 ? "no" : "unknown", e.navDz);
+    }
+}
 static uintptr_t FindField(uintptr_t cls, const char* name) {   // the FProperty itself (first match up the chain)
     for (int depth = 0; cls && depth < 64; ++depth) {
         uintptr_t f = 0; Rd(cls + OFF_UStruct_ChildProps, f);
@@ -896,7 +950,8 @@ struct SteerTargets {
     uintptr_t floorFn = 0; int fCap = -1, fLine = -1, fSweep = -1, fRad = -1, fParms = 0, fHit = -1, fWalk = -1, fDist = -1, offCapRad = -1;
     uint8_t mHit = 0, mWalk = 0;                                      // K2_ComputeFloorDist parameters (FloorResult fields)
     uintptr_t traceFn = 0, kslCdo = 0; int lWorld = -1, lStart = -1, lEnd = -1, lChan = -1, lComplex = -1, lIgnoreSelf = -1, lParms = 0,
-        lHit = -1, lImpact = -1, lNormal = -1, lRet = -1; uint8_t mLHit = 0;   // LineTraceSingle parameters (OutHit fields)
+        lHit = -1, lImpact = -1, lNormal = -1, lRet = -1, lComp = -1; uint8_t mLHit = 0;   // LineTraceSingle parameters (OutHit fields)
+    int offMobility = -1;                                             // USceneComponent::Mobility (0 static, 1 stationary, 2 movable)
     uintptr_t ai = 0;       // the character's anim instance (mesh AnimScriptInstance)
     uintptr_t actReq = 0;   // the character's action request: [[pawn+0x638]+0x1B8]; +0x90 = action type (4 dodge, 8 parkour)
 };
@@ -908,7 +963,7 @@ static int g_pHitActor = -1, g_pHitComp = -1;
 static uint8_t g_mBlock = 0, g_mPenetr = 0;
 static int g_fCap = -1, g_fLine = -1, g_fSweep = -1, g_fRad = -1, g_fParms = 0, g_fHit = -1, g_fWalk = -1, g_fDist = -1, g_offCapRad = -1;
 static uint8_t g_mHit = 0, g_mWalk = 0;
-static int g_lWorld = -1, g_lStart = -1, g_lEnd = -1, g_lChan = -1, g_lComplex = -1, g_lIgnoreSelf = -1, g_lParms = 0, g_lHit = -1, g_lImpact = -1, g_lNormal = -1, g_lRet = -1;
+static int g_lWorld = -1, g_lStart = -1, g_lEnd = -1, g_lChan = -1, g_lComplex = -1, g_lIgnoreSelf = -1, g_lParms = 0, g_lHit = -1, g_lImpact = -1, g_lNormal = -1, g_lRet = -1, g_lComp = -1, g_offMobility = -1;
 static uint8_t g_mLHit = 0;
 static uintptr_t g_thr[3] = {}; static float g_thrOrig[3] = {};
 static const char* THR_NAMES[3] = { "ClimbThresholdAngle", "ParkourJumpThresholdAngle", "JumpThresholdAngle" };
@@ -1114,6 +1169,13 @@ static void UpdateSteerTargets() {
         Log("K2_ComputeFloorDist %p: location +%d line +%d sweep +%d radius +%d, %d bytes; floor hit +%d/%02X walkable +%d/%02X dist +%d; capsule radius +0x%X",
             (void*)ff, g_fCap, g_fLine, g_fSweep, g_fRad, g_fParms, g_fHit, g_mHit, g_fWalk, g_mWalk, g_fDist, g_offCapRad);
     }
+    uintptr_t npf = g_navProjFn.load();
+    if (npf && g_npPoint < 0) {
+        g_npWorld = FindProp(npf, "WorldContextObject"); g_npPoint = FindProp(npf, "Point"); g_npNavData = FindProp(npf, "NavData");
+        g_npExtent = FindProp(npf, "QueryExtent"); g_npRet = FindProp(npf, "ReturnValue"); int32_t sz = 0; Rd(npf + 0x58, sz); g_npParms = sz;
+        Log("ProjectPointToNavigation %p (default object %p): world +%d point +%d navdata +%d extent +%d return +%d, %d bytes",
+            (void*)npf, (void*)g_navCdo.load(), g_npWorld, g_npPoint, g_npNavData, g_npExtent, g_npRet, g_npParms);
+    }
     uintptr_t lt = g_traceFn.load();
     if (lt && g_lStart < 0) {
         g_lWorld = FindProp(lt, "WorldContextObject"); g_lStart = FindProp(lt, "Start"); g_lEnd = FindProp(lt, "End");
@@ -1128,13 +1190,16 @@ static void UpdateSteerTargets() {
             int ip = FindProp(hs, "ImpactPoint"), in = FindProp(hs, "ImpactNormal");
             if (ip >= 0) g_lImpact = ho + ip;
             if (in >= 0) g_lNormal = ho + in;
+            int ic = FindProp(hs, "Component"); if (ic >= 0) g_lComp = ho + ic;
         }
         Log("LineTraceSingle %p (library %p): world +%d start +%d end +%d channel +%d complex +%d ignoreSelf +%d return +%d, %d bytes; hit +%d/%02X impact +%d normal +%d",
             (void*)lt, (void*)g_kslCdo.load(), g_lWorld, g_lStart, g_lEnd, g_lChan, g_lComplex, g_lIgnoreSelf, g_lRet, g_lParms, g_lHit, g_mLHit, g_lImpact, g_lNormal);
     }
     t.traceFn = lt; t.kslCdo = g_kslCdo.load(); t.lWorld = g_lWorld; t.lStart = g_lStart; t.lEnd = g_lEnd; t.lChan = g_lChan;
     t.lComplex = g_lComplex; t.lIgnoreSelf = g_lIgnoreSelf; t.lParms = g_lParms; t.lHit = g_lHit; t.mLHit = g_mLHit;
-    t.lImpact = g_lImpact; t.lNormal = g_lNormal; t.lRet = g_lRet;
+    t.lImpact = g_lImpact; t.lNormal = g_lNormal; t.lRet = g_lRet; t.lComp = g_lComp;
+    if (g_offMobility < 0 && t.root) { uintptr_t rc = 0; Rd(t.root + OFF_UObject_Class, rc); if (rc) g_offMobility = FindProp(rc, "Mobility"); }
+    t.offMobility = g_offMobility;
     t.floorFn = ff; t.fCap = g_fCap; t.fLine = g_fLine; t.fSweep = g_fSweep; t.fRad = g_fRad; t.fParms = g_fParms;
     t.fHit = g_fHit; t.mHit = g_mHit; t.fWalk = g_fWalk; t.mWalk = g_mWalk; t.fDist = g_fDist; t.offCapRad = g_offCapRad;
     t.setLoc = fn; t.pNewLoc = g_pNewLoc; t.pSweep = g_pSweep; t.pTeleport = g_pTeleport; t.parmsSize = g_parmsSize;
@@ -1350,8 +1415,34 @@ static TraceHit TraceDown(const SteerTargets& t, const float from[3], float len)
     if (t.lNormal >= 0) memcpy(&r.nz, parms + t.lNormal + 8, 4);
     return r;
 }
+// Is there nav map (the walkable area the party / enemies use) at this point? 1 yes, 0 no, -1 unknown. Game thread only.
+// The engine call returns the point unchanged when nothing is found, so ask from 40 cm above the ground: a success
+// moves it down onto the nav map. *dz = how far it moved.
+static int NavAt(const SteerTargets& t, const float ground[3], float* dz) {
+    uintptr_t fn = g_navProjFn.load(), cdo = g_navCdo.load();
+    *dz = 0.f;
+    if (!fn || !cdo || g_npPoint < 0 || g_npRet < 0 || g_npParms <= 0 || g_npParms > 256) return -1;
+    alignas(16) uint8_t parms[256] = {};
+    if (g_npWorld >= 0) memcpy(parms + g_npWorld, &t.pawn, 8);
+    float q[3] = { ground[0], ground[1], ground[2] + 40.f };
+    memcpy(parms + g_npPoint, q, 12);
+    uintptr_t nm = g_navMesh.load(); if (g_npNavData >= 0 && nm) memcpy(parms + g_npNavData, &nm, 8);
+    float ext[3] = { 60.f, 60.f, 120.f }; if (g_npExtent >= 0) memcpy(parms + g_npExtent, ext, 12);
+    g_peOrig(reinterpret_cast<void*>(cdo), reinterpret_cast<void*>(fn), parms);
+    float r[3]; memcpy(r, parms + g_npRet, 12);
+    float ddx = r[0] - q[0], ddy = r[1] - q[1], ddz = r[2] - q[2];
+    if (std::fabs(ddx) < 0.01f && std::fabs(ddy) < 0.01f && std::fabs(ddz) < 0.01f) return 0;
+    *dz = ddz; return 1;
+}
 // Line trace between two points (Visibility) ignoring the character. Game thread only.
-struct SegHit { bool ok = false, hit = false; float n[3] = {}, p[3] = {}; };
+struct SegHit { bool ok = false, hit = false; float n[3] = {}, p[3] = {}; int32_t compIdx = -1; };
+static bool HitMovable(const SteerTargets& t, int32_t idx) {
+    uintptr_t ga = g_guObjArr.load(); if (idx <= 0 || !ga || t.offMobility < 0) return false;
+    uintptr_t chunks = 0, chunk = 0, obj = 0; uint8_t mob = 0;
+    if (!Rd(ga + 0x10, chunks) || !chunks || !Rd(chunks + 8 * (uintptr_t)(idx / 65536), chunk) || !chunk ||
+        !Rd(chunk + 24 * (uintptr_t)(idx % 65536), obj) || !obj || !Rd(obj + t.offMobility, mob)) return false;
+    return mob == 2;
+}
 static SegHit TraceSeg(const SteerTargets& t, const float from[3], const float to[3]) {
     SegHit r; alignas(16) uint8_t parms[1024];
     if (!t.traceFn || !t.kslCdo || t.lParms <= 0 || t.lParms > (int)sizeof(parms) || t.lStart < 0 || t.lEnd < 0 || t.lHit < 0 || t.lNormal < 0) return r;
@@ -1363,14 +1454,44 @@ static SegHit TraceSeg(const SteerTargets& t, const float from[3], const float t
     g_peOrig(reinterpret_cast<void*>(t.kslCdo), reinterpret_cast<void*>(t.traceFn), parms);
     r.ok = true; r.hit = (parms[t.lHit] & t.mLHit) != 0; memcpy(r.n, parms + t.lNormal, 12);
     if (t.lImpact >= 0) memcpy(r.p, parms + t.lImpact, 12);
+    if (t.lComp >= 0) memcpy(&r.compIdx, parms + t.lComp, 4);   // TWeakObjectPtr: ObjectIndex first
     return r;
 }
+// one event per roll at an edge: the normal check (max_drop) and a deep look (30 m) with the nav map at the landing
+static void EdgeEvent(const SteerTargets& t, const float pos[3], float dx, float dy, const TraceHit& h, float drop, const char* why) {
+    unsigned w = g_edgeW.load(); if (w - g_edgeR >= 32) return;
+    EdgeEv& e = g_edgeQ[w % 32];
+    memcpy(e.pos, pos, 12); e.dir[0] = dx; e.dir[1] = dy; e.drop = h.hit ? drop : -1.f; e.comp = -1; e.deepComp = -1;
+    (void)h;
+    float p[3] = { pos[0] + dx * 100.f, pos[1] + dy * 100.f, pos[2] + 50.f };
+    SegHit d; float to[3] = { p[0], p[1], p[2] - 3000.f };
+    d = TraceSeg(t, p, to);
+    e.deepHit = d.ok && d.hit; e.deepDrop = e.deepHit ? (pos[2] - 96.f) - d.p[2] : -1.f; e.deepComp = d.compIdx;
+    e.nav = e.deepHit ? NavAt(t, d.p, &e.navDz) : -1;
+    strncpy(e.why, why, sizeof(e.why) - 1); e.why[sizeof(e.why) - 1] = 0;
+    g_edgeW.store(w + 1);
+}
 // is there ground within max_drop below his feet, `ahead` cm past `at` (along dir)? Unknown (no trace) counts as yes.
+// Deeper ground (up to max_drop_walkable) counts when it is on the walkable map.
+static int NavAt(const SteerTargets& t, const float ground[3], float* dz);
+static bool WalkableBelow(const SteerTargets& t, const float p[3], float feetZ, float maxDrop, float maxWalk, float* dropOut) {
+    if (!(maxWalk > maxDrop)) return false;
+    TraceHit h = TraceDown(t, p, (p[2] - feetZ) + maxWalk);
+    if (!h.ok || !h.hit) return false;
+    float drop = feetZ - h.z; if (dropOut) *dropOut = drop;
+    if (drop > maxWalk) return false;
+    float g[3] = { p[0], p[1], h.z }, dz = 0.f;
+    bool ok = NavAt(t, g, &dz) == 1;
+    static unsigned logged = 0;
+    if (logged < 60) { ++logged; Log("deep drop %.0f cm: ground %s the walkable map -> %s", drop, ok ? "on" : "NOT on", ok ? "roll off allowed" : "stop"); }
+    return ok;
+}
 static bool DropOk(const SteerTargets& t, const float at[3], float dirX, float dirY, float ahead, float maxDrop) {
     const float halfH = 96.f;                             // capsule half height (feet = centre - 96)
     float p[3] = { at[0] + dirX * ahead, at[1] + dirY * ahead, at[2] + 50.f };
     TraceHit h = TraceDown(t, p, 50.f + halfH + maxDrop);
     bool ok = !h.ok || h.hit;
+    if (!ok) ok = WalkableBelow(t, p, at[2] - halfH, maxDrop, g_steer.maxDropWalk, nullptr);
     static unsigned logged = 0;
     float drop = h.hit ? (at[2] - halfH) - h.z : 99999.f;
     if (kDiag && logged < 40 && (!ok || !h.ok || drop > 30.f)) {   // edges only (flat ground isn't interesting)
@@ -1569,6 +1690,7 @@ static void GameTick() {
         static double since = -1.0; static float latchYaw = 0.f; static bool latched = false;
         static float prevXY[2] = {}; static double prevT = -1.0; static float realSpeed = 999.f;
         static unsigned nEval = 0, nSlow = 0, nWall = 0, nOn = 0; static double lastLog = 0; static float stuckFor = 0.f;
+        static bool byFallback = false; static double fallbackT = -1.0;
         bool want = false;
         if (prevT > 0 && now - prevT >= 0.03) {
             float dx0 = pos[0] - prevXY[0], dy0 = pos[1] - prevXY[1];
@@ -1602,29 +1724,41 @@ static void GameTick() {
             for (int k = 0; k < 3 && !want; ++k) {
                 float from[3] = { pos[0], pos[1], pos[2] + hz[k] }, to[3] = { pos[0] + dx * reach, pos[1] + dy * reach, pos[2] + hz[k] };
                 SegHit h = TraceSeg(t, from, to);
-                if (charAhead || !h.hit || std::fabs(h.n[2]) >= 0.7f) continue;
+                if (charAhead || !h.hit || std::fabs(h.n[2]) >= 0.7f || HitMovable(t, h.compIdx)) continue;   // movable = debris, props
                 {   // wide enough to be a wall (not a lamp post, sign or branch): a trace one capsule-width to either side hits too
                     float sx = -dy * (rad * 0.6f), sy = dx * (rad * 0.6f); bool side = false;
                     for (int sgn = -1; sgn <= 1 && !side; sgn += 2) {
                         float f2[3] = { from[0] + sx * sgn, from[1] + sy * sgn, from[2] }, t2[3] = { to[0] + sx * sgn, to[1] + sy * sgn, to[2] };
                         SegHit hs = TraceSeg(t, f2, t2);
-                        side = hs.hit && std::fabs(hs.n[2]) < 0.7f;
+                        side = hs.hit && std::fabs(hs.n[2]) < 0.7f && !HitMovable(t, hs.compIdx);
                     }
                     if (!side) continue;
                 }
                 float face = h.n[0] * dx + h.n[1] * dy;                      // -1 = wall straight ahead
                 float dist = std::sqrt((h.p[0] - pos[0]) * (h.p[0] - pos[0]) + (h.p[1] - pos[1]) * (h.p[1] - pos[1])) - rad;
-                if (face < -0.1f && (sp < 80.f || sameWay)) want = true;                          // pressed against it
+                if (face < -0.5f && (sp < 80.f || sameWay)) want = true;                          // pressed against it (within ~60 deg)
                 else if (face < -0.8f && facing && dist < 10.f + sp * 0.12f) want = true;         // about to run into it head-on
             }
-            if (want) ++nWall;
-            else if (!charAhead && (sp < 30.f || sameWay) && facing) { stuckFor += dt; if (stuckFor > 0.18f) { want = true; ++nSlow; } }   // blocked by something the trace doesn't see
+            // blocked by something the traces don't see (invisible walls): the GAME is moving him (its own velocity is
+            // high) but his position doesn't change. Judged on the game's velocity, so standing still, the end of an
+            // action or our own input block can never trigger it; a fallback stop re-checks every 0.6 s.
+            float gv[3] = {}; float gvs = 0.f;
+            if (t.offVel >= 0 && RdBytes(t.cmc + t.offVel, gv, 12)) gvs = std::sqrt(gv[0] * gv[0] + gv[1] * gv[1]);
+            if (want) { ++nWall; byFallback = false; stuckFor = 0.f; }
+            else if (latched && byFallback && sameWay && now - fallbackT < 0.6) want = true;
+            else if (!charAhead && facing && gvs > 250.f && sp < 30.f) {
+                stuckFor += dt;
+                if (stuckFor > 0.18f) { want = true; ++nSlow; if (!latched) { byFallback = true; fallbackT = now; } }
+            }
             else stuckFor = 0.f;
             if (want && !latched) latchYaw = yaw;
         } else stuckFor = 0.f;
-        if (want) { if (since < 0) since = now; } else { since = -1.0; latched = false; }
+        if (want) { if (since < 0) since = now; } else { since = -1.0; latched = false; byFallback = false; }
         bool wasLatched = g_wallBlock != 0;
-        if (want && now - since > 0.04) { latched = true; ++nOn; }
+        if (want && now - since > 0.04) {
+            if (!latched) { static unsigned nLogged = 0; if (++nLogged <= 200) Log("wall stop on (%s)", byFallback ? "blocked without a wall hit" : "wall ahead"); }
+            latched = true; ++nOn;
+        }
         g_wallAi.store(t.ai);
         g_wallBlock = latched ? 1 : 0;
         // hand on the wall: a wall reaching head height, the configured animation (if this character has it), held at a pose
@@ -1694,10 +1828,18 @@ static void GameTick() {
         if (deflected) {
             float cx = m.dirX * d - dx, cy = m.dirY * d - dy, to[3] = { pos[0] + cx, pos[1] + cy, pos[2] };
             SweepResult r = SW_FAIL;
-            if (!DropOk(t, to, m.dirX, m.dirY, CapsuleRadius(t) + 30.f, sc.maxDrop)) { m.edgeStop = true; ++m.cliffStops; }   // big cliff / out of bounds
+            if (!DropOk(t, to, m.dirX, m.dirY, CapsuleRadius(t) + 30.f, sc.maxDrop)) {   // big cliff / out of bounds
+                m.edgeStop = true; ++m.cliffStops;
+                static double loggedRoll = -1.0;
+                if (loggedRoll != m.blockRollT0) { loggedRoll = m.blockRollT0; TraceHit z; EdgeEvent(t, pos, m.dirX, m.dirY, z, 0.f, "slid along edge, stop"); }
+            }
             else r = SweepTo(t, pos, to);
             if (r == SW_CLEAR) { ++m.edgePushes; m.pushedThisRoll = true; RdBytes(t.root + t.offRelLoc, pos, 12); }
-            else if (r == SW_BLOCKED) m.edgeStop = true;      // it's a wall, not an edge
+            else if (r == SW_BLOCKED) {                      // it's a wall, not an edge
+                m.edgeStop = true;
+                static double loggedRoll = -1.0;
+                if (loggedRoll != m.blockRollT0) { loggedRoll = m.blockRollT0; TraceHit z; EdgeEvent(t, pos, m.dirX, m.dirY, z, 0.f, "blocked (wall?)"); }
+            }
         }
     }
     if (m.prevMode == 1 && mode == 3 && sc.offLedges && m.dirSet && now - m.rollT0 < 1.5) {   // left the ground mid-roll
@@ -1743,7 +1885,13 @@ static void GameTick() {
             float p[3] = { pos[0] + m.dirX * 100.f, pos[1] + m.dirY * 100.f, pos[2] + 50.f };
             TraceHit h = TraceDown(t, p, 50.f + halfH + sc.maxDrop);
             float drop = h.hit ? (pos[2] - halfH) - h.z : 99999.f;
-            if (h.ok && h.hit && drop > 40.f && drop <= sc.maxDrop) { m.offActive = true; ++m.edgeCarries; }
+            bool walk = false;
+            if (h.ok && !h.hit) { float wd = 0.f; walk = WalkableBelow(t, p, pos[2] - halfH, sc.maxDrop, sc.maxDropWalk, &wd); }
+            if (h.ok && ((h.hit && drop > 40.f && drop <= sc.maxDrop) || walk)) { m.offActive = true; ++m.edgeCarries; }
+            else if (h.ok && (!h.hit || drop > 40.f)) {
+                static double loggedRoll = -1.0;
+                if (loggedRoll != m.blockRollT0) { loggedRoll = m.blockRollT0; EdgeEvent(t, pos, m.dirX, m.dirY, h, drop, h.hit ? "too high" : "no ground in reach"); }
+            }
         }
         g_carryOn = m.offActive ? 1 : 0;
         if (m.offActive) {
@@ -2119,7 +2267,9 @@ static LedgeDetectFn g_detOrig = nullptr;
 static std::atomic<unsigned> g_detCalls{0}, g_detSideHits{0};
 static std::atomic<long long> g_detTicks{0};
 
-static bool HookLedgeDetect(const float* xf, float reach, void* out, void* a4, void* a5, void* a6, void* a7) {
+// the game's search, straight ahead and (side_angle) to either side; *usedAng = the angle the hit came from
+static bool LedgeSearch(const float* xf, float reach, void* out, void* a4, void* a5, void* a6, void* a7, float* usedAng) {
+    *usedAng = 0.f;
     if (g_detOrig(xf, reach, out, a4, a5, a6, a7)) { g_sideOnly = 0; return true; }
     g_sideOnly = 0;
     const float ang = g_steer.sideAngle;
@@ -2136,9 +2286,40 @@ static bool HookLedgeDetect(const float* xf, float reach, void* out, void* a4, v
     }
     QueryPerformanceCounter(&t1); g_detTicks += t1.QuadPart - t0.QuadPart;
     if (hit) {
-        g_sideOnly = 1;
+        g_sideOnly = 1; *usedAng = used;
         unsigned n = ++g_detSideHits;
         if (n <= 20) Log("ledge found %+.0f deg to the side", used);
+    }
+    return hit;
+}
+
+// Does the ground fall away ahead (a drop) rather than rise (a climb / vault)? Floor samples 40..180 cm along the
+// search direction: the first one that is more than 60 cm below the feet (or has no floor) means down; anything
+// rising more than 40 cm above the feet first means up.
+static bool DropAhead(const float* xf, float angDeg) {
+    const SteerTargets& t = g_tg[g_tgFront.load()];
+    if (!t.traceFn) return false;
+    const float x = xf[0], y = xf[1], z = xf[2], w = xf[3];
+    float yaw = std::atan2(2.f * (w * z + x * y), 1.f - 2.f * (y * y + z * z)) + angDeg * 0.0174532925f;
+    float dx = std::cos(yaw), dy = std::sin(yaw), feet = xf[6] - 96.f;   // capsule half height 96
+    for (float d : { 40.f, 80.f, 130.f, 180.f }) {
+        float from[3] = { xf[4] + dx * d, xf[5] + dy * d, feet + 150.f };
+        TraceHit h = TraceDown(t, from, 150.f + 250.f);
+        if (!h.ok) return false;
+        if (!h.hit || feet - h.z > 60.f) return true;
+        if (h.z - feet > 40.f) return false;
+    }
+    return false;
+}
+
+static bool HookLedgeDetect(const float* xf, float reach, void* out, void* a4, void* a5, void* a6, void* a7) {
+    float used = 0.f;
+    bool hit = LedgeSearch(xf, reach, out, a4, a5, a6, a7, &used);
+    const float k = g_steer.dropPromptReach;
+    if (hit && g_enabled && k < 1.f && xf && !g_handOn && DropAhead(xf, used)) {   // a drop: it must be closer than other ledges
+        hit = LedgeSearch(xf, reach * k, out, a4, a5, a6, a7, &used);
+        static unsigned n = 0;
+        if (!hit && ++n <= 20) Log("drop prompt held back: not within %.0f%% of the reach yet", k * 100.f);
     }
     return hit;
 }
@@ -2567,7 +2748,7 @@ static void ArmWatchpoint() {
 
 static uintptr_t FindGUObjectArray(uintptr_t base);
 static DWORD WINAPI MainThread(LPVOID) {
-    Log("A Bit Better Traversal Movement v1.4.0-beta running, base=%p", (void*)g_base);
+    Log("A Bit Better Traversal Movement v1.3.1 running, base=%p", (void*)g_base);
     for (int tries = 0; !g_guObjArr.load(); ++tries) {   // builds without a known address: find the object table
         if (tries == 600) { Log("object table (GUObjectArray) not found - the mod is off"); return 0; }
         uintptr_t a = FindGUObjectArray(g_base);
@@ -2726,7 +2907,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID) {
         if (!m || GetLastError() == ERROR_ALREADY_EXISTS) return TRUE;
         wchar_t path[MAX_PATH]; IniPath(path, L"TraversalSpeed.log");
         g_log = _wfopen(path, L"w");
-        Log("A Bit Better Traversal Movement v1.4.0-beta loaded");
+        Log("A Bit Better Traversal Movement v1.3.1 loaded");
         g_base = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
         if (!IsSupportedBuild(g_base)) {
             Log("this game version is not supported (game update?) - the mod is off, the game runs unmodified");
